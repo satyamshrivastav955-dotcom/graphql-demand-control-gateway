@@ -23,7 +23,11 @@ class FeaturePipeline:
         # AST-based features
         features.update(extract_structural_features(ast))
         features.update(extract_semantic_features(ast))
-        features.update(extract_cost_features(ast, query))  # Pass query string for token count
+        features.update(extract_cost_features(
+            ast,
+            query_string=query,
+            custom_field_costs=context.get("field_costs")
+        ))
         features.update(extract_injection_features(ast, context.get("variables")))
         features.update(extract_fragment_directive_features(ast))
         

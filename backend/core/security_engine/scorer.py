@@ -95,6 +95,12 @@ class SecurityScorer:
             base_score += 20 + (breadth - 8) * 1  # Shallow query with many fields -> LOW_RISK
         elif max_mult >= 100:
             base_score += 22  # High pagination limit on list -> LOW_RISK
+
+        # 4b. DIRECTIVE-BASED COMPLEXITY & COST OVERLOAD
+        if cost_estimate >= 5000:
+            base_score += 65.0  # Massive resource cost -> HIGH_RISK
+        elif cost_estimate >= 1000:
+            base_score += 30.0  # Substantial query cost
         
         # 5. SENSITIVE FIELD ACCESS
         if sensitive_fields > 0:
@@ -130,6 +136,7 @@ class SecurityScorer:
         if injection_score > 0: attack_signals += 2
         if circular_fragment > 0: attack_signals += 2
         if directive_abuse > 0: attack_signals += 1
+        if cost_estimate >= 2000: attack_signals += 1
         
         if attack_signals >= 2:
             base_score += 20  # Multi-vector attack confirmation boost

@@ -151,6 +151,13 @@ class ExplainabilityEngine:
                 "score": 0.5,
                 "description": f"Multiple fragments ({features['fragment_count']}) - complexity"
             })
+
+        if features.get('cost_estimate', 0) >= 1000:
+            explanations.append({
+                "feature": "cost_estimate",
+                "score": 0.75,
+                "description": f"Query execution cost ({features['cost_estimate']}) exceeds acceptable complexity baseline"
+            })
         
         if features.get('query_rate', 0) > 10:
             explanations.append({

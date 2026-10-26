@@ -143,3 +143,39 @@ def test_directive_abuse_detection():
     features = pipeline.extract_features(directive_overload)
     assert features["directive_abuse_detected"] == 1
     assert features["max_directives_per_field"] >= 6
+
+
+def test_directive_cost_weighting():
+    pipeline = FeaturePipeline()
+    query_with_cost = """
+    query {
+        heavyAnalytics @cost(weight: 50) {
+            reportData @cost(weight: 25)
+        }
+    }
+    """
+    features = pipeline.extract_features(query_with_cost)
+    assert features["directive_cost_count"] == 2
+    assert features["cost_estimate"] >= 75
+    assert features["complexity_score"] >= 75
+
+
+def test_custom_field_cost_and_scoring():
+    pipeline = FeaturePipeline()
+    query = """
+    query {
+        expensiveExport {
+            data
+        }
+    }
+    """
+    features = pipeline.extract_features(query, context={"field_costs": {"expensiveExport": 1200}})
+    assert features["cost_estimate"] >= 1200
+
+    scorer = SecurityScorer({})
+    scores = scorer.score(features)
+    assert scores["ensemble_score"] >= 30
+
+    explainer = ExplainabilityEngine()
+    explanations = explainer.explain(features, scores)
+    assert any(e["feature"] == "cost_estimate" for e in explanations)
