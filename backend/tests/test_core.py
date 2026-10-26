@@ -2,6 +2,7 @@ import pytest
 from backend.core.parser.ast_parser import ASTParser
 from backend.core.features.feature_pipeline import FeaturePipeline
 from backend.core.security_engine.scorer import SecurityScorer
+from backend.core.security_engine.explainability import ExplainabilityEngine
 
 def test_ast_parser_valid():
     query = "query { user { name } }"
@@ -59,8 +60,6 @@ def test_ring_buffer_operations():
 
 
 def test_scorer_hybrid_ml_and_explainability():
-    from backend.core.security_engine.explainability import ExplainabilityEngine
-
     model_paths = {
         "autoencoder": "backend/core/models/autoencoder/ae_model.joblib",
         "random_forest": "backend/core/models/random_forest/rf_model.joblib",
@@ -89,8 +88,6 @@ def test_scorer_hybrid_ml_and_explainability():
     assert any("introspection" in f or "depth" in f or "anomaly" in f for f in feature_names)
 
 
-
-
 def test_injection_detection():
     pipeline = FeaturePipeline()
     sqli_query = 'query { user(name: "\' OR \'1\'=\'1") { id email } }'
@@ -102,3 +99,47 @@ def test_injection_detection():
     scores = scorer.score(features)
     assert scores["risk_tier"] in ("HIGH_RISK", "CRITICAL")
     assert scores["ensemble_score"] >= 70
+
+
+def test_circular_fragment_detection():
+    pipeline = FeaturePipeline()
+    circular_query = """
+    query {
+        user {
+            ...UserFragmentA
+        }
+    }
+    fragment UserFragmentA on User {
+        id
+        ...UserFragmentB
+    }
+    fragment UserFragmentB on User {
+        name
+        ...UserFragmentA
+    }
+    """
+    features = pipeline.extract_features(circular_query)
+    assert features["circular_fragment_detected"] == 1
+    
+    scorer = SecurityScorer({})
+    scores = scorer.score(features)
+    assert scores["risk_tier"] == "CRITICAL"
+    assert scores["ensemble_score"] >= 85
+
+    explainer = ExplainabilityEngine()
+    explanations = explainer.explain(features, scores)
+    assert any(e["feature"] == "circular_fragment_loop" for e in explanations)
+
+
+def test_directive_abuse_detection():
+    pipeline = FeaturePipeline()
+    directive_overload = """
+    query {
+        user {
+            id @include(if: true) @skip(if: false) @include(if: true) @skip(if: false) @include(if: true) @skip(if: false)
+        }
+    }
+    """
+    features = pipeline.extract_features(directive_overload)
+    assert features["directive_abuse_detected"] == 1
+    assert features["max_directives_per_field"] >= 6

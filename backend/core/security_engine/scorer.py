@@ -62,6 +62,8 @@ class SecurityScorer:
         mutation_score = features.get('mutation_score', 0)
         cost_estimate = features.get('cost_estimate', 0)
         injection_score = features.get('injection_score', 0.0)
+        circular_fragment = features.get('circular_fragment_detected', 0)
+        directive_abuse = features.get('directive_abuse_detected', 0)
         
         # ========== PURE HEURISTIC SCORING (More Reliable) ==========
         # Start with base score of 0
@@ -108,6 +110,12 @@ class SecurityScorer:
         if fragment_count > 2:
             base_score += fragment_count * 8
 
+        # 7b. RECURSIVE FRAGMENT LOOPS & DIRECTIVE OVERLOAD
+        if circular_fragment > 0:
+            base_score += 90.0  # Immediate CRITICAL tier for circular recursion
+        if directive_abuse > 0:
+            base_score += 55.0  # Directive overload attack
+        
         # 8. ARGUMENT INJECTION ATTACKS (SQLi, NoSQLi, XSS, CMDi)
         if injection_score > 0:
             base_score += 70 + int(injection_score * 25)  # Direct CRITICAL tier (70-95)
@@ -120,6 +128,8 @@ class SecurityScorer:
         if fragment_count > 2: attack_signals += 1
         if sensitive_fields > 0: attack_signals += 1
         if injection_score > 0: attack_signals += 2
+        if circular_fragment > 0: attack_signals += 2
+        if directive_abuse > 0: attack_signals += 1
         
         if attack_signals >= 2:
             base_score += 20  # Multi-vector attack confirmation boost

@@ -62,6 +62,20 @@ class ExplainabilityEngine:
                 logger.debug(f"SHAP explanation failed: {e}, falling back to heuristics")
         
         # Fallback to heuristic explanations
+        if features.get('circular_fragment_detected', 0) > 0:
+            explanations.append({
+                "feature": "circular_fragment_loop",
+                "score": 1.0,
+                "description": "Cyclic fragment reference detected (recursive DoS vector)"
+            })
+
+        if features.get('directive_abuse_detected', 0) > 0:
+            explanations.append({
+                "feature": "directive_abuse",
+                "score": 0.85,
+                "description": f"Excessive directives detected (max {features.get('max_directives_per_field', 0)} per field) - parser overload"
+            })
+
         if features.get('sqli_detected', 0) > 0:
             explanations.append({
                 "feature": "sql_injection",
