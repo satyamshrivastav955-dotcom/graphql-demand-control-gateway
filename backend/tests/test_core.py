@@ -89,3 +89,16 @@ def test_scorer_hybrid_ml_and_explainability():
     assert any("introspection" in f or "depth" in f or "anomaly" in f for f in feature_names)
 
 
+
+
+def test_injection_detection():
+    pipeline = FeaturePipeline()
+    sqli_query = 'query { user(name: "\' OR \'1\'=\'1") { id email } }'
+    features = pipeline.extract_features(sqli_query)
+    assert features["sqli_detected"] == 1
+    assert features["injection_score"] > 0
+
+    scorer = SecurityScorer({})
+    scores = scorer.score(features)
+    assert scores["risk_tier"] in ("HIGH_RISK", "CRITICAL")
+    assert scores["ensemble_score"] >= 70

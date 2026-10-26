@@ -61,6 +61,7 @@ class SecurityScorer:
         sensitive_fields = features.get('sensitive_field_count', 0)
         mutation_score = features.get('mutation_score', 0)
         cost_estimate = features.get('cost_estimate', 0)
+        injection_score = features.get('injection_score', 0.0)
         
         # ========== PURE HEURISTIC SCORING (More Reliable) ==========
         # Start with base score of 0
@@ -106,14 +107,19 @@ class SecurityScorer:
         # 7. FRAGMENT ABUSE
         if fragment_count > 2:
             base_score += fragment_count * 8
+
+        # 8. ARGUMENT INJECTION ATTACKS (SQLi, NoSQLi, XSS, CMDi)
+        if injection_score > 0:
+            base_score += 70 + int(injection_score * 25)  # Direct CRITICAL tier (70-95)
         
-        # 8. MULTI-VECTOR ATTACK DETECTION
+        # 9. MULTI-VECTOR ATTACK DETECTION
         attack_signals = 0
         if introspection > 0: attack_signals += 1
         if depth >= 8: attack_signals += 1
         if alias_count > 5: attack_signals += 1
         if fragment_count > 2: attack_signals += 1
         if sensitive_fields > 0: attack_signals += 1
+        if injection_score > 0: attack_signals += 2
         
         if attack_signals >= 2:
             base_score += 20  # Multi-vector attack confirmation boost

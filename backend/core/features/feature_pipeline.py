@@ -2,6 +2,7 @@ from .structural import extract_structural_features
 from .semantic import extract_semantic_features
 from .behavioral import extract_behavioral_features
 from .cost_features import extract_cost_features
+from .injection import extract_injection_features
 from ..parser.ast_parser import ASTParser
 
 class FeaturePipeline:
@@ -22,6 +23,7 @@ class FeaturePipeline:
         features.update(extract_structural_features(ast))
         features.update(extract_semantic_features(ast))
         features.update(extract_cost_features(ast, query))  # Pass query string for token count
+        features.update(extract_injection_features(ast, context.get("variables")))
         
         # Behavioral features
         features.update(extract_behavioral_features(client_id, context))

@@ -62,6 +62,34 @@ class ExplainabilityEngine:
                 logger.debug(f"SHAP explanation failed: {e}, falling back to heuristics")
         
         # Fallback to heuristic explanations
+        if features.get('sqli_detected', 0) > 0:
+            explanations.append({
+                "feature": "sql_injection",
+                "score": 0.98,
+                "description": "SQL injection attack signature detected in field arguments"
+            })
+
+        if features.get('nosqli_detected', 0) > 0:
+            explanations.append({
+                "feature": "nosql_injection",
+                "score": 0.95,
+                "description": "NoSQL operator injection detected in field arguments"
+            })
+
+        if features.get('xss_detected', 0) > 0:
+            explanations.append({
+                "feature": "xss_injection",
+                "score": 0.9,
+                "description": "Cross-site scripting (XSS) payload detected in argument value"
+            })
+
+        if features.get('cmd_detected', 0) > 0:
+            explanations.append({
+                "feature": "command_injection",
+                "score": 0.99,
+                "description": "Operating system command injection payload detected in argument"
+            })
+
         if features.get('introspection_score', 0) > 0:
             explanations.append({
                 "feature": "introspection_score",
