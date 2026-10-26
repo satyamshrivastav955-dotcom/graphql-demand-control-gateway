@@ -137,3 +137,30 @@ def test_gateway_forwards_to_upstream(tmp_path):
     assert result["extensions"]["security"]["decision"] == "ALLOW"
     assert result["extensions"]["security"]["risk_tier"] == "SAFE"
 
+
+
+def test_gateway_processes_batch_queries(tmp_path):
+    gw = make_gateway(tmp_path, {"security": {"batch": {"allow_batching": True, "max_operations": 5}}})
+    batch = [
+        {"query": "query { user { name } }"},
+        {"query": "query { products { title } }"}
+    ]
+    results = asyncio.run(gw.process_batch_request(batch, {"client_id": "batch_tester", "ip": "127.0.0.1"}))
+    assert isinstance(results, list)
+    assert len(results) == 2
+    assert results[0]["data"] is not None
+    assert results[1]["data"] is not None
+
+
+def test_gateway_blocks_batch_overload(tmp_path):
+    gw = make_gateway(tmp_path, {"security": {"batch": {"allow_batching": True, "max_operations": 2}}})
+    batch = [
+        {"query": "query { a { id } }"},
+        {"query": "query { b { id } }"},
+        {"query": "query { c { id } }"}
+    ]
+    result = asyncio.run(gw.process_batch_request(batch, {"client_id": "attacker", "ip": "127.0.0.1"}))
+    assert "errors" in result
+    assert "exceeds" in result["errors"][0]["message"].lower()
+    assert result["extensions"]["security"]["decision"] == "BLOCK"
+    assert result["extensions"]["security"]["risk_tier"] == "CRITICAL"

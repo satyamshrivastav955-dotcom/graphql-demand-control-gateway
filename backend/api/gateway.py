@@ -36,6 +36,11 @@ class GraphQLGateway:
         self.http_client = http_client or httpx.AsyncClient(limits=limits, timeout=self.upstream_timeout)
         self._owns_client = http_client is None
 
+        # Batch security policy
+        batch_cfg = config.get('security', {}).get('batch', {})
+        self.allow_batching = bool(batch_cfg.get('allow_batching', True))
+        self.max_batch_size = int(batch_cfg.get('max_operations', 10))
+
         # Ensure the log directory exists before the first write
         if self.log_path:
             os.makedirs(os.path.dirname(self.log_path) or ".", exist_ok=True)
@@ -51,6 +56,79 @@ class GraphQLGateway:
         """Close managed HTTP connection pool."""
         if self._owns_client and self.http_client:
             await self.http_client.aclose()
+
+    async def process_batch_request(self, batch_data: list, client_info: dict):
+        """Process and enforce security policy on a batch GraphQL array request."""
+        start_time = time.time()
+        client_id = client_info.get('client_id', 'unknown')
+        ip = client_info.get('ip', 'unknown')
+
+        # 1. Batching Policy Disablement Check
+        if not self.allow_batching:
+            self.log_counter += 1
+            err_entry = {
+                "id": str(uuid.uuid4()),
+                "index": self.log_counter,
+                "timestamp": datetime.now().isoformat(),
+                "client_id": client_id,
+                "ip": ip,
+                "query": "[BATCH_DISABLED]",
+                "features": {"batch_size": len(batch_data)},
+                "scores": {"ensemble_score": 90.0, "risk_tier": "HIGH_RISK"},
+                "decision": "BLOCK",
+                "explanations": [{"feature": "batch_query", "score": 1.0, "description": "Batch GraphQL requests are disallowed by policy"}],
+                "latency_ms": (time.time() - start_time) * 1000
+            }
+            self._log_decision(err_entry)
+            return {
+                "data": None,
+                "errors": [{"message": "Batch GraphQL requests are disabled by security policy"}],
+                "extensions": {
+                    "security": {
+                        "decision": "BLOCK",
+                        "risk_tier": "HIGH_RISK",
+                        "score": 90.0,
+                        "latency_ms": (time.time() - start_time) * 1000
+                    }
+                }
+            }
+
+        # 2. Maximum Operations Limit
+        if len(batch_data) > self.max_batch_size:
+            self.log_counter += 1
+            err_entry = {
+                "id": str(uuid.uuid4()),
+                "index": self.log_counter,
+                "timestamp": datetime.now().isoformat(),
+                "client_id": client_id,
+                "ip": ip,
+                "query": f"[BATCH_OVERLOAD_ATTACK: {len(batch_data)} ops]",
+                "features": {"batch_size": len(batch_data), "max_allowed": self.max_batch_size},
+                "scores": {"ensemble_score": 95.0, "risk_tier": "CRITICAL"},
+                "decision": "BLOCK",
+                "explanations": [{"feature": "batch_overload", "score": 1.0, "description": f"Batch size ({len(batch_data)}) exceeds configured threshold ({self.max_batch_size})"}],
+                "latency_ms": (time.time() - start_time) * 1000
+            }
+            self._log_decision(err_entry)
+            return {
+                "data": None,
+                "errors": [{"message": f"Batch size ({len(batch_data)}) exceeds maximum allowed limit ({self.max_batch_size})"}],
+                "extensions": {
+                    "security": {
+                        "decision": "BLOCK",
+                        "risk_tier": "CRITICAL",
+                        "score": 95.0,
+                        "latency_ms": (time.time() - start_time) * 1000
+                    }
+                }
+            }
+
+        # 3. Process each query in batch
+        batch_results = []
+        for req in batch_data:
+            res = await self.process_request(req, client_info)
+            batch_results.append(res)
+        return batch_results
 
     async def process_request(self, request_data: dict, client_info: dict):
         start_time = time.time()

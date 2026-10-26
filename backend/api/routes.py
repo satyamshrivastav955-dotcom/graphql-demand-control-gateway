@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union, List
 import json
 import os
 import asyncio
@@ -63,7 +63,7 @@ def read_all_logs():
 
 
 @router.post("/graphql-proxy")
-async def graphql_proxy(request: Request, body: GraphQLRequest):
+async def graphql_proxy(request: Request, body: Union[GraphQLRequest, List[GraphQLRequest]]):
     if not gateway:
         raise HTTPException(status_code=503, detail="Gateway not initialized")
     
@@ -74,7 +74,10 @@ async def graphql_proxy(request: Request, body: GraphQLRequest):
         "headers": {k.lower(): v for k, v in request.headers.items()}
     }
     
-    result = await gateway.process_request(body.model_dump(), client_info)
+    if isinstance(body, list):
+        result = await gateway.process_batch_request([item.model_dump() for item in body], client_info)
+    else:
+        result = await gateway.process_request(body.model_dump(), client_info)
     return result
 
 

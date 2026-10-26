@@ -14,6 +14,9 @@ upstream:
   max_keepalive_connections: 20
 
 security:
+  batch:
+    allow_batching: true
+    max_operations: 10
   policy:
     default_action: "ALLOW" # ALLOW, THROTTLE, BLOCK
     thresholds:
