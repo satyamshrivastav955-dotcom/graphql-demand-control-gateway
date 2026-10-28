@@ -1,19 +1,158 @@
 import React, { useState } from 'react';
 import Layout from '../components/Layout';
 import axios from 'axios';
-import { Play, Shield, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Play, Shield, AlertTriangle, CheckCircle, Zap } from 'lucide-react';
 import { API_BASE_URL } from '../utils/api';
 
+interface AttackPreset {
+    name: string;
+    description: string;
+    tier: 'SAFE' | 'LOW_RISK' | 'MEDIUM_RISK' | 'HIGH_RISK' | 'CRITICAL';
+    badgeColor: string;
+    query: string;
+}
+
+const PRESETS: AttackPreset[] = [
+    {
+        name: "Safe Baseline",
+        description: "Normal production query",
+        tier: "SAFE",
+        badgeColor: "bg-green-100 text-green-700 hover:bg-green-200 border-green-300",
+        query: `query GetUserProfile {
+  user(id: "usr_42") {
+    id
+    name
+    posts(limit: 5) {
+      id
+      title
+    }
+  }
+}`
+    },
+    {
+        name: "SQL Injection",
+        description: "Bypasses authentication via SQL injection in arguments",
+        tier: "CRITICAL",
+        badgeColor: "bg-red-100 text-red-700 hover:bg-red-200 border-red-300",
+        query: `query ExploitAuthentication {
+  user(name: "' OR '1'='1' UNION SELECT * FROM credentials--") {
+    id
+    email
+  }
+}`
+    },
+    {
+        name: "Depth Bomb (DoS)",
+        description: "12 levels of recursive query nesting",
+        tier: "HIGH_RISK",
+        badgeColor: "bg-orange-100 text-orange-700 hover:bg-orange-200 border-orange-300",
+        query: `query NestedDepthBomb {
+  a {
+    b {
+      c {
+        d {
+          e {
+            f {
+              g {
+                h {
+                  i {
+                    j {
+                      k {
+                        l
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+    },
+    {
+        name: "Circular Fragment Loop",
+        description: "Infinite expansion loop between recursive fragments",
+        tier: "CRITICAL",
+        badgeColor: "bg-red-100 text-red-700 hover:bg-red-200 border-red-300",
+        query: `query CircularLoopAttack {
+  user(id: "1") {
+    ...FragmentA
+  }
+}
+
+fragment FragmentA on User {
+  id
+  ...FragmentB
+}
+
+fragment FragmentB on User {
+  name
+  ...FragmentA
+}`
+    },
+    {
+        name: "Schema Enumeration",
+        description: "Full introspection probing types & schema",
+        tier: "MEDIUM_RISK",
+        badgeColor: "bg-yellow-100 text-yellow-700 hover:bg-yellow-200 border-yellow-300",
+        query: `query IntrospectEntireSchema {
+  __schema {
+    types {
+      name
+      fields {
+        name
+        type {
+          name
+        }
+      }
+    }
+  }
+}`
+    },
+    {
+        name: "Alias Overload (Batch)",
+        description: "8 parallel resolver executions via aliases",
+        tier: "HIGH_RISK",
+        badgeColor: "bg-orange-100 text-orange-700 hover:bg-orange-200 border-orange-300",
+        query: `query AliasFlood {
+  u1: user(id: "1") { id email }
+  u2: user(id: "2") { id email }
+  u3: user(id: "3") { id email }
+  u4: user(id: "4") { id email }
+  u5: user(id: "5") { id email }
+  u6: user(id: "6") { id email }
+  u7: user(id: "7") { id email }
+  u8: user(id: "8") { id email }
+}`
+    },
+    {
+        name: "@cost Directive Weight",
+        description: "Explicit heavy computation resolver cost weights",
+        tier: "HIGH_RISK",
+        badgeColor: "bg-purple-100 text-purple-700 hover:bg-purple-200 border-purple-300",
+        query: `query HighCostCalculations {
+  heavyAnalytics @cost(weight: 2500) {
+    reportData @cost(weight: 1500)
+    auditLog @cost(weight: 1500)
+  }
+}`
+    }
+];
+
 const Playground: React.FC = () => {
-    const [query, setQuery] = useState<string>('query { user(id: "123") { name } }');
+    const [query, setQuery] = useState<string>(PRESETS[0].query);
     const [response, setResponse] = useState<any>(null);
     const [loading, setLoading] = useState(false);
 
-    const handleRun = async () => {
+    const handleRunQuery = async (queryText?: string) => {
+        const textToRun = queryText !== undefined ? queryText : query;
         setLoading(true);
         try {
             const res = await axios.post(`${API_BASE_URL}/graphql-proxy`, {
-                query: query
+                query: textToRun
             });
             setResponse(res.data);
         } catch (error: any) {
@@ -25,15 +164,40 @@ const Playground: React.FC = () => {
 
     return (
         <Layout>
-            <h1 className="text-2xl font-bold mb-6 text-slate-800">Query Playground</h1>
+            <div className="flex justify-between items-center mb-4">
+                <h1 className="text-2xl font-bold text-slate-800">Query Playground & Threat Simulator</h1>
+            </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-12rem)]">
+            {/* 1-Click Simulation Presets Bar */}
+            <div className="mb-4 bg-white p-3 rounded-lg shadow-sm border border-slate-200">
+                <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 flex items-center space-x-1">
+                    <Zap size={14} className="text-amber-500" />
+                    <span>1-Click Security Simulation Presets</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    {PRESETS.map((p) => (
+                        <button
+                            key={p.name}
+                            onClick={() => {
+                                setQuery(p.query);
+                                handleRunQuery(p.query);
+                            }}
+                            className={`px-2.5 py-1 text-xs font-semibold rounded border transition-all ${p.badgeColor}`}
+                            title={p.description}
+                        >
+                            {p.name}
+                        </button>
+                    ))}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[calc(100vh-17rem)]">
                 {/* Input Section */}
                 <div className="flex flex-col bg-white rounded-lg shadow overflow-hidden">
                     <div className="bg-slate-100 px-4 py-2 border-b border-slate-200 flex justify-between items-center">
-                        <span className="text-sm font-medium text-slate-600">GraphQL Query</span>
+                        <span className="text-sm font-medium text-slate-600">GraphQL Query Editor</span>
                         <button
-                            onClick={handleRun}
+                            onClick={() => handleRunQuery()}
                             disabled={loading}
                             className="flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm transition-colors disabled:opacity-50"
                         >
@@ -88,14 +252,14 @@ const Playground: React.FC = () => {
                                             <div>
                                                 <span className="text-slate-500">Final Score:</span>
                                                 <span className="font-mono font-bold ml-2 text-xl">
-                                                    {response.extensions.security.score?.toFixed(1) || '0.0'}
+                                                    {response.extensions.security.score !== undefined ? response.extensions.security.score.toFixed(1) : '0.0'}
                                                 </span>
                                                 <span className="text-slate-400">/100</span>
                                             </div>
                                             <div>
                                                 <span className="text-slate-500">Latency:</span>
                                                 <span className="font-mono font-bold ml-2">
-                                                    {response.extensions.security.latency_ms?.toFixed(2) || '0.00'}ms
+                                                    {response.extensions.security.latency_ms !== undefined ? response.extensions.security.latency_ms.toFixed(2) : '0.00'}ms
                                                 </span>
                                             </div>
                                         </div>
@@ -124,20 +288,35 @@ const Playground: React.FC = () => {
                                                 </div>
                                             </div>
                                         )}
+
+                                        {/* Explainability Breakdown */}
+                                        {response.extensions.security.explanations && response.extensions.security.explanations.length > 0 && (
+                                            <div className="border-t pt-3 mt-3">
+                                                <h5 className="text-xs font-bold text-slate-400 uppercase mb-2">Threat Explanations</h5>
+                                                <div className="space-y-1.5">
+                                                    {response.extensions.security.explanations.map((exp: any, idx: number) => (
+                                                        <div key={idx} className="text-xs bg-white/80 p-2 rounded border border-slate-200 flex justify-between items-center">
+                                                            <span className="font-medium text-slate-700">{exp.description}</span>
+                                                            <span className="font-mono text-slate-500 font-bold ml-2">{(exp.score * 100).toFixed(0)}%</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
 
                                 {/* Raw JSON Response */}
                                 <div>
                                     <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">JSON Response</h4>
-                                    <pre className="font-mono text-xs text-slate-700 whitespace-pre-wrap break-all">
+                                    <pre className="font-mono text-xs text-slate-700 whitespace-pre-wrap break-all bg-white p-3 rounded border border-slate-200">
                                         {JSON.stringify(response, null, 2)}
                                     </pre>
                                 </div>
                             </div>
                         ) : (
                             <div className="h-full flex items-center justify-center text-slate-400 text-sm">
-                                Run a query to see results
+                                Select a preset or run a custom query to view real-time security inspection
                             </div>
                         )}
                     </div>
