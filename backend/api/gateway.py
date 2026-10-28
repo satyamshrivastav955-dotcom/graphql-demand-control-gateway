@@ -11,6 +11,7 @@ from ..core.features.behavioral_store import BehavioralStore
 from ..core.security_engine.scorer import SecurityScorer
 from ..core.security_engine.policy import SecurityPolicy
 from ..core.security_engine.explainability import ExplainabilityEngine
+from ..core.throttling.token_bucket import TokenBucketLimiter
 from ..storage.ring_buffer import LogRingBuffer, ring_buffer as default_ring_buffer
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,13 @@ class GraphQLGateway:
         self.allow_batching = bool(batch_cfg.get('allow_batching', True))
         self.max_batch_size = int(batch_cfg.get('max_operations', 10))
 
+        # Token Bucket Throttling Policy
+        throttling_cfg = config.get('security', {}).get('throttling', {})
+        self.rate_limiter = TokenBucketLimiter(
+            rate_limit=int(throttling_cfg.get('rate_limit', 100)),
+            window_seconds=int(throttling_cfg.get('window', 60))
+        )
+
         # Ensure the log directory exists before the first write
         if self.log_path:
             os.makedirs(os.path.dirname(self.log_path) or ".", exist_ok=True)
@@ -62,6 +70,7 @@ class GraphQLGateway:
         start_time = time.time()
         client_id = client_info.get('client_id', 'unknown')
         ip = client_info.get('ip', 'unknown')
+        actor_key = ip if ip != 'unknown' else client_id
 
         # 1. Batching Policy Disablement Check
         if not self.allow_batching:
@@ -123,25 +132,95 @@ class GraphQLGateway:
                 }
             }
 
-        # 3. Process each query in batch
+        # 3. Rate Limit for batch
+        is_allowed, rate_meta = self.rate_limiter.check(actor_key, cost=float(len(batch_data)))
+        if not is_allowed:
+            self.log_counter += 1
+            err_entry = {
+                "id": str(uuid.uuid4()),
+                "index": self.log_counter,
+                "timestamp": datetime.now().isoformat(),
+                "client_id": client_id,
+                "ip": ip,
+                "query": f"[BATCH_RATE_LIMITED: {len(batch_data)} ops]",
+                "features": {"rate_limited": 1, "retry_after": rate_meta["retry_after"]},
+                "scores": {"ensemble_score": 80.0, "risk_tier": "HIGH_RISK"},
+                "decision": "THROTTLE",
+                "explanations": [{"feature": "rate_limit_exceeded", "score": 0.9, "description": f"Batch exhausted rate limit tokens. Retry after {rate_meta['retry_after']}s"}],
+                "latency_ms": (time.time() - start_time) * 1000
+            }
+            self._log_decision(err_entry)
+            return {
+                "data": None,
+                "errors": [{"message": f"Rate limit exceeded. Try again in {rate_meta['retry_after']} seconds."}],
+                "extensions": {
+                    "security": {
+                        "decision": "THROTTLE",
+                        "risk_tier": "HIGH_RISK",
+                        "score": 80.0,
+                        "retry_after_seconds": rate_meta["retry_after"],
+                        "latency_ms": (time.time() - start_time) * 1000
+                    }
+                }
+            }
+
+        # 4. Process each query in batch
         batch_results = []
         for req in batch_data:
-            res = await self.process_request(req, client_info)
+            res = await self.process_request(req, client_info, skip_rate_check=True)
             batch_results.append(res)
         return batch_results
 
-    async def process_request(self, request_data: dict, client_info: dict):
+    async def process_request(self, request_data: dict, client_info: dict, skip_rate_check: bool = False):
         start_time = time.time()
         query = request_data.get('query')
 
         if not isinstance(query, str) or not query.strip():
             return {"errors": [{"message": "No valid query provided"}]}
 
+        client_id = client_info.get('client_id', 'unknown')
+        ip = client_info.get('ip', 'unknown')
+        actor_key = ip if ip != 'unknown' else client_id
+
+        # 0. Token Bucket Rate Limiting Check
+        if not skip_rate_check:
+            is_rate_allowed, rate_meta = self.rate_limiter.check(actor_key)
+            if not is_rate_allowed:
+                self.log_counter += 1
+                log_entry = {
+                    "id": str(uuid.uuid4()),
+                    "index": self.log_counter,
+                    "timestamp": datetime.now().isoformat(),
+                    "client_id": client_id,
+                    "ip": ip,
+                    "query": query[:120],
+                    "features": {"rate_limited": 1, "retry_after": rate_meta["retry_after"]},
+                    "scores": {"ensemble_score": 80.0, "risk_tier": "HIGH_RISK"},
+                    "decision": "THROTTLE",
+                    "explanations": [{
+                        "feature": "rate_limit_exceeded",
+                        "score": 0.9,
+                        "description": f"Rate limit quota exceeded. Remaining: 0, retry in {rate_meta['retry_after']}s"
+                    }],
+                    "latency_ms": (time.time() - start_time) * 1000
+                }
+                self._log_decision(log_entry)
+                return {
+                    "data": None,
+                    "errors": [{"message": f"Rate limit exceeded. Try again in {rate_meta['retry_after']} seconds."}],
+                    "extensions": {
+                        "security": {
+                            "decision": "THROTTLE",
+                            "risk_tier": "HIGH_RISK",
+                            "score": 80.0,
+                            "retry_after_seconds": rate_meta["retry_after"],
+                            "latency_ms": (time.time() - start_time) * 1000
+                        }
+                    }
+                }
+
         try:
             # 1. Feature Extraction
-            client_id = client_info.get('client_id', 'unknown')
-            ip = client_info.get('ip', 'unknown')
-            
             features = self.feature_pipeline.extract_features(query, client_id, {})
             
             if not features:
