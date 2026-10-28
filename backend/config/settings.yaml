@@ -33,6 +33,12 @@ security:
     rate_limit: 100 # requests per minute
     window: 60 # seconds
 
+alerts:
+  enabled: false
+  webhook_url: ""
+  min_severity: "CRITICAL"
+  cooldown_seconds: 60
+
 feature_extraction:
   max_depth: 15
   max_aliases: 50

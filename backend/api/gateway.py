@@ -13,6 +13,7 @@ from ..core.security_engine.policy import SecurityPolicy
 from ..core.security_engine.explainability import ExplainabilityEngine
 from ..core.throttling.token_bucket import TokenBucketLimiter
 from ..core.quarantine.manager import QuarantineManager
+from ..alerts.webhook_dispatcher import WebhookDispatcher
 from ..storage.ring_buffer import LogRingBuffer, ring_buffer as default_ring_buffer
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,17 @@ class GraphQLGateway:
 
         # Automated Quarantine & Dynamic Blacklist Manager
         self.quarantine_manager = QuarantineManager()
+
+        # Webhook Alert Dispatcher
+        alerts_cfg = config.get('alerts', {})
+        webhook_url = alerts_cfg.get('webhook_url') or os.environ.get('ALERT_WEBHOOK_URL')
+        self.webhook_dispatcher = WebhookDispatcher(
+            webhook_url=webhook_url,
+            enabled=bool(alerts_cfg.get('enabled', False) or webhook_url),
+            min_severity=alerts_cfg.get('min_severity', 'CRITICAL'),
+            cooldown_seconds=float(alerts_cfg.get('cooldown_seconds', 60.0)),
+            http_client=self.http_client
+        )
 
         # Ensure the log directory exists before the first write
         if self.log_path:
@@ -335,6 +347,18 @@ class GraphQLGateway:
                 if scores.get('risk_tier') == "CRITICAL":
                     atk_label = explanations[0]["feature"] if explanations else "CriticalAttack"
                     self.quarantine_manager.record_violation(client_id, ip, attack_type=atk_label)
+
+                # Dispatch real-time webhook alert in background
+                if scores.get('risk_tier') in ("CRITICAL", "HIGH_RISK"):
+                    self.webhook_dispatcher.dispatch_alert_background({
+                        "ip": ip,
+                        "client_id": client_id,
+                        "risk_tier": scores.get('risk_tier', 'CRITICAL'),
+                        "score": scores.get('ensemble_score', 0),
+                        "decision": decision,
+                        "attack_type": explanations[0]["feature"] if explanations else "CriticalAttack",
+                        "query": query
+                    })
 
                 return {
                     "data": None,
