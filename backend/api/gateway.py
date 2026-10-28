@@ -12,6 +12,7 @@ from ..core.security_engine.scorer import SecurityScorer
 from ..core.security_engine.policy import SecurityPolicy
 from ..core.security_engine.explainability import ExplainabilityEngine
 from ..core.throttling.token_bucket import TokenBucketLimiter
+from ..core.quarantine.manager import QuarantineManager
 from ..storage.ring_buffer import LogRingBuffer, ring_buffer as default_ring_buffer
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,9 @@ class GraphQLGateway:
             window_seconds=int(throttling_cfg.get('window', 60))
         )
 
+        # Automated Quarantine & Dynamic Blacklist Manager
+        self.quarantine_manager = QuarantineManager()
+
         # Ensure the log directory exists before the first write
         if self.log_path:
             os.makedirs(os.path.dirname(self.log_path) or ".", exist_ok=True)
@@ -71,6 +75,38 @@ class GraphQLGateway:
         client_id = client_info.get('client_id', 'unknown')
         ip = client_info.get('ip', 'unknown')
         actor_key = ip if ip != 'unknown' else client_id
+
+        # 0. Check active quarantine status
+        is_quarantined, q_record = self.quarantine_manager.is_quarantined(client_id, ip)
+        if is_quarantined:
+            self.log_counter += 1
+            err_entry = {
+                "id": str(uuid.uuid4()),
+                "index": self.log_counter,
+                "timestamp": datetime.now().isoformat(),
+                "client_id": client_id,
+                "ip": ip,
+                "query": "[BATCH_QUARANTINED_BLOCKED]",
+                "features": {"quarantined": 1, "batch_size": len(batch_data)},
+                "scores": {"ensemble_score": 100.0, "risk_tier": "CRITICAL"},
+                "decision": "BLOCK",
+                "explanations": [{"feature": "client_quarantine", "score": 1.0, "description": f"Actor is quarantined: {q_record.reason}"}],
+                "latency_ms": (time.time() - start_time) * 1000
+            }
+            self._log_decision(err_entry)
+            return {
+                "data": None,
+                "errors": [{"message": f"Client is quarantined due to repeated violations: {q_record.reason}"}],
+                "extensions": {
+                    "security": {
+                        "decision": "BLOCK",
+                        "risk_tier": "CRITICAL",
+                        "score": 100.0,
+                        "quarantined": True,
+                        "latency_ms": (time.time() - start_time) * 1000
+                    }
+                }
+            }
 
         # 1. Batching Policy Disablement Check
         if not self.allow_batching:
@@ -182,7 +218,44 @@ class GraphQLGateway:
         ip = client_info.get('ip', 'unknown')
         actor_key = ip if ip != 'unknown' else client_id
 
-        # 0. Token Bucket Rate Limiting Check
+        # 0a. Check active quarantine status
+        is_quarantined, q_record = self.quarantine_manager.is_quarantined(client_id, ip)
+        if is_quarantined:
+            self.log_counter += 1
+            log_entry = {
+                "id": str(uuid.uuid4()),
+                "index": self.log_counter,
+                "timestamp": datetime.now().isoformat(),
+                "client_id": client_id,
+                "ip": ip,
+                "query": "[QUARANTINED_ACTOR_BLOCKED]",
+                "features": {"quarantined": 1, "remaining_seconds": q_record.remaining_seconds},
+                "scores": {"ensemble_score": 100.0, "risk_tier": "CRITICAL"},
+                "decision": "BLOCK",
+                "explanations": [{
+                    "feature": "client_quarantine",
+                    "score": 1.0,
+                    "description": f"Actor is quarantined: {q_record.reason}. Remaining: {q_record.remaining_seconds}s"
+                }],
+                "latency_ms": (time.time() - start_time) * 1000
+            }
+            self._log_decision(log_entry)
+            return {
+                "data": None,
+                "errors": [{"message": f"Client is quarantined due to repeated violations: {q_record.reason}"}],
+                "extensions": {
+                    "security": {
+                        "decision": "BLOCK",
+                        "risk_tier": "CRITICAL",
+                        "score": 100.0,
+                        "quarantined": True,
+                        "remaining_seconds": q_record.remaining_seconds,
+                        "latency_ms": (time.time() - start_time) * 1000
+                    }
+                }
+            }
+
+        # 0b. Token Bucket Rate Limiting Check
         if not skip_rate_check:
             is_rate_allowed, rate_meta = self.rate_limiter.check(actor_key)
             if not is_rate_allowed:
@@ -258,6 +331,11 @@ class GraphQLGateway:
             
             # 7. Action
             if decision == "BLOCK":
+                # Automated Quarantine: Record violation if CRITICAL attack
+                if scores.get('risk_tier') == "CRITICAL":
+                    atk_label = explanations[0]["feature"] if explanations else "CriticalAttack"
+                    self.quarantine_manager.record_violation(client_id, ip, attack_type=atk_label)
+
                 return {
                     "data": None,
                     "errors": [{"message": "Query blocked by Security Policy"}],

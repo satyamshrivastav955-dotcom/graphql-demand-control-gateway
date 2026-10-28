@@ -391,3 +391,35 @@ async def get_explanation(query_id: str):
         },
         "contributions": contributions[:5]  # Top 5
     }
+
+
+
+class QuarantineActionRequest(BaseModel):
+    key: str
+    reason: Optional[str] = "Manual Administrator Action"
+
+
+@router.get("/api/quarantine")
+async def get_quarantined_actors():
+    """Retrieve list of currently quarantined and blacklisted client actors."""
+    if gateway and hasattr(gateway, "quarantine_manager"):
+        return {"quarantined": gateway.quarantine_manager.list_quarantined()}
+    return {"quarantined": []}
+
+
+@router.post("/api/quarantine/unban")
+async def unban_actor(req: QuarantineActionRequest):
+    """Unban a client IP or client ID from active quarantine."""
+    if gateway and hasattr(gateway, "quarantine_manager"):
+        removed = gateway.quarantine_manager.unban(req.key)
+        return {"status": "ok", "unbanned": req.key, "found": removed}
+    return {"status": "error", "message": "Gateway not initialized"}
+
+
+@router.post("/api/quarantine/blacklist")
+async def blacklist_actor(req: QuarantineActionRequest):
+    """Manually add an actor IP or client ID to the permanent blacklist."""
+    if gateway and hasattr(gateway, "quarantine_manager"):
+        gateway.quarantine_manager.blacklist(req.key, req.reason or "Admin Blacklist")
+        return {"status": "ok", "blacklisted": req.key}
+    return {"status": "error", "message": "Gateway not initialized"}
