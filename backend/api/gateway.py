@@ -14,6 +14,7 @@ from ..core.security_engine.explainability import ExplainabilityEngine
 from ..core.throttling.token_bucket import TokenBucketLimiter
 from ..core.quarantine.manager import QuarantineManager
 from ..alerts.webhook_dispatcher import WebhookDispatcher
+from ..telemetry.prometheus import prometheus_exporter
 from ..storage.ring_buffer import LogRingBuffer, ring_buffer as default_ring_buffer
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,9 @@ class GraphQLGateway:
             http_client=self.http_client
         )
 
+        # Prometheus Metrics Telemetry Exporter
+        self.telemetry = prometheus_exporter
+
         # Ensure the log directory exists before the first write
         if self.log_path:
             os.makedirs(os.path.dirname(self.log_path) or ".", exist_ok=True)
@@ -88,6 +92,9 @@ class GraphQLGateway:
         ip = client_info.get('ip', 'unknown')
         actor_key = ip if ip != 'unknown' else client_id
 
+        # Record batch telemetry
+        self.telemetry.record_batch(len(batch_data))
+
         # 0. Check active quarantine status
         is_quarantined, q_record = self.quarantine_manager.is_quarantined(client_id, ip)
         if is_quarantined:
@@ -106,6 +113,7 @@ class GraphQLGateway:
                 "latency_ms": (time.time() - start_time) * 1000
             }
             self._log_decision(err_entry)
+            self.telemetry.record_blocked("client_quarantine")
             return {
                 "data": None,
                 "errors": [{"message": f"Client is quarantined due to repeated violations: {q_record.reason}"}],
@@ -137,6 +145,7 @@ class GraphQLGateway:
                 "latency_ms": (time.time() - start_time) * 1000
             }
             self._log_decision(err_entry)
+            self.telemetry.record_blocked("batch_disabled")
             return {
                 "data": None,
                 "errors": [{"message": "Batch GraphQL requests are disabled by security policy"}],
@@ -167,6 +176,7 @@ class GraphQLGateway:
                 "latency_ms": (time.time() - start_time) * 1000
             }
             self._log_decision(err_entry)
+            self.telemetry.record_blocked("batch_overload")
             return {
                 "data": None,
                 "errors": [{"message": f"Batch size ({len(batch_data)}) exceeds maximum allowed limit ({self.max_batch_size})"}],
@@ -198,6 +208,7 @@ class GraphQLGateway:
                 "latency_ms": (time.time() - start_time) * 1000
             }
             self._log_decision(err_entry)
+            self.telemetry.record_request("THROTTLE", "HIGH_RISK", (time.time() - start_time))
             return {
                 "data": None,
                 "errors": [{"message": f"Rate limit exceeded. Try again in {rate_meta['retry_after']} seconds."}],
@@ -252,6 +263,8 @@ class GraphQLGateway:
                 "latency_ms": (time.time() - start_time) * 1000
             }
             self._log_decision(log_entry)
+            self.telemetry.record_request("BLOCK", "CRITICAL", (time.time() - start_time))
+            self.telemetry.record_blocked("client_quarantine")
             return {
                 "data": None,
                 "errors": [{"message": f"Client is quarantined due to repeated violations: {q_record.reason}"}],
@@ -290,6 +303,7 @@ class GraphQLGateway:
                     "latency_ms": (time.time() - start_time) * 1000
                 }
                 self._log_decision(log_entry)
+                self.telemetry.record_request("THROTTLE", "HIGH_RISK", (time.time() - start_time))
                 return {
                     "data": None,
                     "errors": [{"message": f"Rate limit exceeded. Try again in {rate_meta['retry_after']} seconds."}],
@@ -326,6 +340,7 @@ class GraphQLGateway:
             
             # 6. Logging with unique ID
             self.log_counter += 1
+            latency_sec = time.time() - start_time
             log_entry = {
                 "id": str(uuid.uuid4()),  # Unique ID for each log
                 "index": self.log_counter,  # Sequential index
@@ -337,9 +352,16 @@ class GraphQLGateway:
                 "scores": scores,
                 "decision": decision,
                 "explanations": explanations,
-                "latency_ms": (time.time() - start_time) * 1000
+                "latency_ms": latency_sec * 1000
             }
             self._log_decision(log_entry)
+
+            # Record Prometheus telemetry metrics
+            self.telemetry.record_request(
+                decision=decision,
+                tier=scores.get('risk_tier', 'UNKNOWN'),
+                latency_seconds=latency_sec
+            )
             
             # 7. Action
             if decision == "BLOCK":
@@ -347,6 +369,10 @@ class GraphQLGateway:
                 if scores.get('risk_tier') == "CRITICAL":
                     atk_label = explanations[0]["feature"] if explanations else "CriticalAttack"
                     self.quarantine_manager.record_violation(client_id, ip, attack_type=atk_label)
+
+                # Record blocked reason in telemetry
+                reason = explanations[0]["feature"] if explanations else "policy_violation"
+                self.telemetry.record_blocked(reason)
 
                 # Dispatch real-time webhook alert in background
                 if scores.get('risk_tier') in ("CRITICAL", "HIGH_RISK"):

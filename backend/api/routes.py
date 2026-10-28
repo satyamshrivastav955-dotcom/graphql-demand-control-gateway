@@ -423,3 +423,14 @@ async def blacklist_actor(req: QuarantineActionRequest):
         gateway.quarantine_manager.blacklist(req.key, req.reason or "Admin Blacklist")
         return {"status": "ok", "blacklisted": req.key}
     return {"status": "error", "message": "Gateway not initialized"}
+
+
+
+@router.get("/metrics")
+async def prometheus_metrics():
+    """Prometheus exposition metrics endpoint for Grafana scrapers."""
+    from fastapi.responses import PlainTextResponse
+    from ..telemetry.prometheus import prometheus_exporter
+    q_count = len(gateway.quarantine_manager.list_quarantined()) if (gateway and hasattr(gateway, "quarantine_manager")) else 0
+    metrics_text = prometheus_exporter.generate_metrics(quarantined_count=q_count)
+    return PlainTextResponse(metrics_text, media_type="text/plain; version=0.0.4; charset=utf-8")
