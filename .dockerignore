@@ -1,0 +1,15 @@
+.git
+**/__pycache__
+**/*.pyc
+.venv
+.env
+.pytest_cache
+.ruff_cache
+dashboard/node_modules
+dashboard/build
+dashboard/dist
+ml/data
+backend/storage
+backend/tests
+docs
+*.md

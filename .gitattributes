@@ -1,0 +1,11 @@
+# Normalise line endings; mark binaries so git never diffs or rewrites them.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary
+*.joblib binary
+*.parquet binary
+docs/openapi.json linguist-generated=true
+ml/reports/*.json linguist-generated=true
+dashboard/package-lock.json linguist-generated=true

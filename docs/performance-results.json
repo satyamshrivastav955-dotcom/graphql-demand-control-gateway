@@ -1,0 +1,112 @@
+{
+  "environment": {
+    "python": "3.13.13",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "cpu": "Intel64 Family 6 Model 191 Stepping 2, GenuineIntel (16 logical cores)"
+  },
+  "note": "scripts/loadtest.py; load generator, gateway and demo upstream share one machine; single gateway process.",
+  "runs": [
+    {
+      "concurrency": 1,
+      "duration_s": 15.0,
+      "attack_ratio": 0.2,
+      "requests": 1154,
+      "requests_per_second": 76.8,
+      "status_counts": {
+        "200": 986,
+        "403": 168
+      },
+      "transport_errors": 0,
+      "latency_ms": {
+        "p50": 11.2,
+        "p95": 23.3,
+        "p99": 35.0,
+        "max": 86.9,
+        "mean": 13.0
+      },
+      "latency_ms_by_outcome": {
+        "allowed (forwarded)": {
+          "n": 986,
+          "p50": 10.9,
+          "p95": 22.6,
+          "p99": 28.5
+        },
+        "blocked": {
+          "n": 168,
+          "p50": 12.6,
+          "p95": 32.9,
+          "p99": 44.8
+        }
+      },
+      "gateway_rss_mb_at_end": 210.9
+    },
+    {
+      "concurrency": 4,
+      "duration_s": 15.0,
+      "attack_ratio": 0.2,
+      "requests": 2658,
+      "requests_per_second": 177.0,
+      "status_counts": {
+        "200": 2251,
+        "403": 407
+      },
+      "transport_errors": 0,
+      "latency_ms": {
+        "p50": 20.1,
+        "p95": 42.2,
+        "p99": 58.0,
+        "max": 99.6,
+        "mean": 22.6
+      },
+      "latency_ms_by_outcome": {
+        "allowed (forwarded)": {
+          "n": 2251,
+          "p50": 20.5,
+          "p95": 42.6,
+          "p99": 58.6
+        },
+        "blocked": {
+          "n": 407,
+          "p50": 17.3,
+          "p95": 38.1,
+          "p99": 48.9
+        }
+      },
+      "gateway_rss_mb_at_end": 213.9
+    },
+    {
+      "concurrency": 32,
+      "duration_s": 20.0,
+      "attack_ratio": 0.2,
+      "requests": 3257,
+      "requests_per_second": 162.1,
+      "status_counts": {
+        "200": 2761,
+        "403": 496
+      },
+      "transport_errors": 0,
+      "latency_ms": {
+        "p50": 170.8,
+        "p95": 411.7,
+        "p99": 609.8,
+        "max": 1109.1,
+        "mean": 197.1
+      },
+      "latency_ms_by_outcome": {
+        "allowed (forwarded)": {
+          "n": 2761,
+          "p50": 188.9,
+          "p95": 428.3,
+          "p99": 656.4
+        },
+        "blocked": {
+          "n": 496,
+          "p50": 68.4,
+          "p95": 99.3,
+          "p99": 162.8
+        }
+      },
+      "gateway_rss_mb_at_end": 220.2
+    }
+  ]
+}

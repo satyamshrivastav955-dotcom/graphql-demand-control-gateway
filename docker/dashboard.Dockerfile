@@ -1,18 +1,15 @@
-FROM node:18-alpine
-
+# syntax=docker/dockerfile:1
+FROM node:22-alpine AS build
 WORKDIR /app
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY dashboard/ ./
+# The dashboard calls the API on the same origin; nginx proxies it to the backend.
+ENV VITE_API_URL=""
+RUN npm run build
 
-# Copy package files
-COPY dashboard/package*.json ./
-
-# Install dependencies
-RUN npm install
-
-# Copy app source
-COPY dashboard/ .
-
-# Expose port
-EXPOSE 3000
-
-# Start the app
-CMD ["npm", "start"]
+FROM nginxinc/nginx-unprivileged:1.27-alpine
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 8080
+HEALTHCHECK --interval=15s --timeout=3s --retries=3 CMD wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1

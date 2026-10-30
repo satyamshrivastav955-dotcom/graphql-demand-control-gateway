@@ -1,1581 +1,274 @@
-# 🛡️ GraphQL Sentinel
+<div align="center">
 
-### AI-Powered Runtime Security Gateway for GraphQL APIs
+<img src="docs/assets/hero.svg" alt="GraphQL Sentinel: an ordinary query is allowed, a deeply nested query is throttled, and a 434-byte fragment bomb that expands to 16,403 fields is blocked at the gate" width="100%">
 
-[![CI](https://github.com/satyamshrivastav955-dotcom/GraphQL-Sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/satyamshrivastav955-dotcom/GraphQL-Sentinel/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
-[![GraphQL](https://img.shields.io/badge/GraphQL-Security-E10098?logo=graphql&logoColor=white)](https://graphql.org/)
-[![Security Model](https://img.shields.io/badge/Security-Defense--in--Depth-critical?logo=shield&logoColor=white)](#security-model)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+<br>
 
-> **Detect. Explain. Score. Protect.**
->
-> GraphQL Sentinel is an intelligent security gateway designed to detect, analyze, explain, and mitigate malicious or abnormal GraphQL operations in real time. Operating as a transparent reverse proxy, Sentinel inspects inbound queries using deterministic AST checks and pre-trained machine learning ensembles before they ever reach your upstream resolvers.
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-white?style=flat-square&labelColor=09090b)](LICENSE)
+![Status](https://img.shields.io/badge/status-v1.0%20pre--release-fbbf24?style=flat-square&labelColor=09090b)
+![Python](https://img.shields.io/badge/python-3.12%2B-white?style=flat-square&labelColor=09090b&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-gateway-white?style=flat-square&labelColor=09090b&logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-dashboard-white?style=flat-square&labelColor=09090b&logo=react&logoColor=white)
 
----
+**[Quick start](#quick-start) · [See it](#see-it) · [How it works](#how-it-works) · [Results](#results) · [Docs](#documentation) · [Limits](#honest-limits)**
 
-## ✨ Why GraphQL Sentinel?
+</div>
 
-GraphQL gives clients enormous flexibility, but that flexibility creates a unique security surface.
+<br>
 
-A single GraphQL request can:
+**GraphQL Sentinel is an open-source security gateway that reads the GraphQL _operation_, not just the HTTP request.**
+It parses every query into an AST, resolves fragments, scores the abuse risk with rules you can read plus a model you can check,
+and answers **ALLOW**, **THROTTLE** or **BLOCK** before anything reaches your API. Every decision is stored with the rules and
+numbers behind it.
 
-- Traverse deeply nested relationships
-- Request hundreds of fields
-- Abuse aliases and fragments
-- Enumerate an entire schema
-- Trigger expensive resolver chains
-- Consume excessive server resources
-- Exploit weak authorization boundaries
-- Generate abnormal traffic patterns
-- Bypass traditional endpoint-based security assumptions
+A request log shows one small `POST`. The danger is inside it: a 434-byte document of eight fragments that expands to
+**16,403 fields**, sixty aliased logins in one request, a query ten levels deep. Depth limits and per-IP rate limits cannot tell
+those apart from a busy dashboard; Sentinel measures what the server would actually execute.
 
-Traditional API security tools often treat:
+<br>
 
-```text
-POST /graphql
-```
+## See it
 
-as a single endpoint.
+<img src="docs/assets/request-log.svg" alt="Six recorded operations and the decisions the shipped engine made for them" width="100%">
 
-GraphQL Sentinel treats the **operation itself as the security boundary**.
+<sub>Recorded by running each operation through the shipped engine (`scripts/export_demo_samples.py`), not mocked.</sub>
 
-Instead of asking only:
+<br>
 
-> "Is this request going to `/graphql`?"
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/landing-hero.png" alt="Landing page with the operation stage"><br><sub><b>Landing page</b>: an animated stage that replays real engine decisions on recorded operations.</sub></td>
+    <td width="50%"><img src="docs/images/overview.png" alt="Overview dashboard"><br><sub><b>Overview</b>: decisions, risk tiers, latency and top signals, computed from stored events.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/images/analyze-result.png" alt="Analyze view showing the rules behind a BLOCK decision"><br><sub><b>Analyze</b>: paste an operation, see the lines and rules that drove the score.</sub></td>
+    <td width="50%"><img src="docs/images/events.png" alt="Security events table"><br><sub><b>Events</b>: filter, search, inspect and export the audit trail.</sub></td>
+  </tr>
+</table>
 
-Sentinel asks:
+<details>
+<summary><b>More screens</b>: evaluation, policies, access gate, mobile</summary>
+<br>
 
-> **"What is this GraphQL operation trying to do, how expensive is it, how does it compare with normal behavior, and should it be allowed to execute?"**
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/evaluation.png" alt="Evaluation page"><br><sub><b>Evaluation</b>: the benchmark behind the numbers below, rendered from the live report.</sub></td>
+    <td width="50%"><img src="docs/images/policies.png" alt="Policies page"><br><sub><b>Policies</b>: the effective limits, tiers and actions (read-only by design).</sub></td>
+  </tr>
+</table>
 
----
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/mobile-landing.png" alt="Landing page on a phone"></td>
+    <td width="33%"><img src="docs/images/mobile-console.png" alt="Operation stage on a phone"></td>
+    <td width="33%"><img src="docs/images/login-gate.png" alt="Dashboard access gate"></td>
+  </tr>
+</table>
 
-# 🎯 Core Concept
+<sub>Real renders of the running stack, checked at 375 px with no horizontal overflow.</sub>
 
-GraphQL Sentinel combines **deterministic security rules**, **GraphQL AST analysis**, **behavioral anomaly detection**, and **risk-based decision making**.
+</details>
 
-```text
-                       ┌─────────────────┐
-                       │ GraphQL Client  │
-                       └────────┬────────┘
-                                │
-                                ▼
-                    ┌──────────────────────┐
-                    │  GraphQL Sentinel    │
-                    │   Security Gateway   │
-                    └──────────┬───────────┘
-                               │
-             ┌─────────────────┼─────────────────┐
-             │                 │                 │
-             ▼                 ▼                 ▼
-       AST Analyzer      Threat Engine     Identity Engine
-             │                 │                 │
-       Depth Analysis     Rule Detection     API Identity
-       Complexity          ML Detection       Reputation
-       Alias Abuse         Behavioral         Rate Limits
-       Fragments           Analysis
-             │                 │                 │
-             └─────────────────┼─────────────────┘
-                               ▼
-                     ┌────────────────────┐
-                     │   Risk Aggregator  │
-                     │      0 - 100       │
-                     └─────────┬──────────┘
-                               │
-                  ┌────────────┼────────────┐
-                  ▼            ▼            ▼
-                ALLOW        THROTTLE      BLOCK
-                  │            │            │
-                  └────────────┼────────────┘
-                               ▼
-                     ┌─────────────────┐
-                     │ GraphQL Server  │
-                     └─────────────────┘
-```
+<br>
 
----
-
-# 🚀 Features
-
-## 🔍 GraphQL AST Security Analysis
-
-Every GraphQL operation can be analyzed before execution.
-
-Sentinel extracts security-relevant features such as:
-
-- Query depth
-- Query complexity
-- Field count
-- Unique field count
-- Alias count
-- Fragment count
-- Fragment depth
-- Argument count
-- Mutation ratio
-- Introspection usage
-- Nested relationship depth
-- Potentially expensive operations
-- Suspicious query structures
-
-Example:
-
-```graphql
-query {
-  users {
-    posts {
-      comments {
-        author {
-          posts {
-            comments {
-              author {
-                posts {
-                  id
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-```
-
-Sentinel can transform this into a security profile:
-
-```text
-Query Analysis
-────────────────────────────
-Depth:              9
-Fields:             14
-Complexity:         847
-Nested Relations:   8
-Fragments:          0
-Aliases:            0
-Introspection:      false
-
-Risk: HIGH
-```
-
----
-
-# 🧠 Hybrid Threat Detection
-
-GraphQL Sentinel is designed around a hybrid detection model.
-
-Instead of relying entirely on machine learning:
-
-```text
-                 Incoming Operation
-                         │
-             ┌───────────┴───────────┐
-             ▼                       ▼
-       Rule-Based Engine       ML Detection
-             │                       │
-       Deterministic             Behavioral
-       Detection                 Detection
-             │                       │
-             └───────────┬───────────┘
-                         ▼
-                  Risk Aggregator
-                         │
-                         ▼
-                  Security Decision
-```
-
-### Deterministic detection
-
-Useful for known security conditions:
-
-- Excessive query depth
-- Excessive complexity
-- Introspection restrictions
-- Rate-limit violations
-- Alias abuse
-- Batch abuse
-- Suspicious mutations
-- Policy violations
-
-### Behavioral detection
-
-Useful for previously unknown or evolving behavior:
-
-- Unusual query patterns
-- Abnormal request frequency
-- Sudden complexity changes
-- User-specific behavioral deviations
-- API-key behavioral anomalies
-- Traffic spikes
-- Previously unseen operation structures
-
----
-
-# 📊 Risk Scoring
-
-Every request can receive a normalized risk score:
-
-```text
-0 ───────────────────────────────────── 100
-│                    │                  │
-SAFE               SUSPICIOUS          CRITICAL
-```
-
-Example:
-
-```text
-┌─────────────────────────────────────────┐
-│             SECURITY DECISION           │
-├─────────────────────────────────────────┤
-│                                         │
-│ Risk Score                 94 / 100     │
-│ Confidence                  97%          │
-│                                         │
-│ Query Depth                 +31          │
-│ Complexity                  +28          │
-│ Behavioral Anomaly          +19          │
-│ Rate Anomaly                +16          │
-│                                         │
-│ Decision                    BLOCK        │
-│ Policy                      HIGH_RISK    │
-│                                         │
-└─────────────────────────────────────────┘
-```
-
-The scoring system is designed to make security decisions **explainable rather than opaque**.
-
----
-
-# 🔬 Behavioral Baselines
-
-One of the key ideas behind Sentinel is that malicious behavior isn't always defined by a static rule.
-
-A query can be technically valid while still being suspicious.
-
-For example, an application normally produces:
-
-```text
-Query depth:        2–4
-Complexity:         20–120
-Requests/minute:    5–20
-Mutations:          <5%
-Introspection:      0%
-```
-
-A sudden pattern like:
-
-```text
-Query depth:        11
-Complexity:         1,900
-Requests/minute:    420
-Mutations:          41%
-Introspection:      27%
-```
-
-can trigger a behavioral anomaly even when no single rule is violated.
-
-This enables Sentinel to detect:
-
-> **"This operation is abnormal for this actor."**
-
-rather than only:
-
-> **"This operation matches a known attack."**
-
----
-
-# 🛡️ Threat Classes
-
-GraphQL Sentinel is designed to detect and mitigate multiple classes of GraphQL abuse.
-
-### Query Abuse
-
-- Excessive query depth
-- Excessive query complexity
-- Nested relationship abuse
-- Large field selections
-- Fragment explosion
-- Alias abuse
-
-### Schema Abuse
-
-- Introspection abuse
-- Schema enumeration
-- Sensitive field discovery
-- Deprecated field probing
-- Unauthorized operation discovery
-
-### Resource Exhaustion
-
-- Query-based DoS
-- Expensive resolver traversal
-- Excessive pagination
-- Large list arguments
-- Batch query abuse
-- High-frequency requests
-
-### Behavioral Threats
-
-- Abnormal user behavior
-- Abnormal API-key behavior
-- Sudden traffic changes
-- Query pattern anomalies
-- Repeated suspicious operations
-
-### Authorization Signals
-
-Sentinel can surface suspicious authorization-related behavior for further investigation, while authorization itself should remain enforced by the underlying application.
-
----
-
-# ⚙️ Policy Engine
-
-Security policies should be configurable rather than hard-coded.
-
-Example:
-
-```yaml
-policies:
-
-  max_query_depth:
-    value: 7
-    action: block
-
-  max_complexity:
-    value: 500
-    action: block
-
-  introspection:
-    production: false
-    action: block
-
-  max_requests_per_minute:
-    value: 120
-    action: throttle
-
-  suspicious_score:
-    threshold: 80
-    action: block
-```
-
-This allows teams to adapt Sentinel to their own API architecture.
-
----
-
-# 🚦 Adaptive Decisions
-
-Sentinel can classify requests into three primary actions:
-
-### 🟢 ALLOW
-
-The request is considered safe.
-
-```text
-Risk: 12
-Action: ALLOW
-```
-
-### 🟡 THROTTLE
-
-The request is suspicious but does not necessarily justify an immediate block.
-
-```text
-Risk: 67
-Action: THROTTLE
-```
-
-### 🔴 BLOCK
-
-The request crosses a configured security threshold.
-
-```text
-Risk: 94
-Action: BLOCK
-```
-
-This makes Sentinel suitable for both:
-
-- Monitoring mode
-- Enforcement mode
-
----
-
-# 🔌 High-Performance Reverse Proxy Gateway
-
-Sentinel operates as a transparent, high-throughput reverse proxy deployed in front of your upstream GraphQL service:
-
-```text
-                 GraphQL Client
-                       │
-                       ▼  POST /graphql-proxy
-             ┌─────────────────────┐
-             │  GraphQL Sentinel   │ ◄── Analyzes AST, Scorer & Policies
-             │   Reverse Proxy     │ ◄── In-Memory Ring Buffer Telemetry
-             └──────────┬──────────┘
-                        │
-         ┌──────────────┴──────────────┐
-         │ (If ALLOW)                  │ (If BLOCK)
-         ▼                             ▼
-┌──────────────────┐          ┌──────────────────┐
-│ Upstream GraphQL │          │ Immediate 403 /  │
-│   API Server     │          │ Policy Error     │
-└──────────────────┘          └──────────────────┘
-```
-
-### Upstream Configuration
-
-Set your upstream server in `backend/config/settings.yaml` or via environment variables:
-
-```yaml
-upstream:
-  url: "http://your-graphql-service:4000/graphql"
-  timeout_seconds: 10.0
-  max_connections: 100
-  max_keepalive_connections: 20
-```
-
-Alternatively, pass `UPSTREAM_GRAPHQL_URL` at runtime:
-
-```bash
-export UPSTREAM_GRAPHQL_URL="http://your-graphql-service:4000/graphql"
-```
-
-- **Transparent Header & Token Forwarding**: Automatically forwards `Authorization`, `X-Request-ID`, and Apollo client headers.
-- **Connection Pooling**: Managed via `httpx.AsyncClient` with reusable keep-alive connection pools.
-- **Security Audit Injection**: Injects risk tier, ensemble score, model predictions, and explanation traces into `extensions.security` without mutating upstream payload data.
-- **In-Memory Ring Buffer**: Caches recent telemetry in an $O(1)$ circular ring buffer (`backend/storage/ring_buffer.py`) with zero-latency SSE broadcasting, while concurrently writing persistent audit logs to disk.
-
----
-
-# 🧪 Attack Simulation Lab
-
-Sentinel can include a controlled security testing environment for development and demonstrations.
-
-Example attack scenarios:
-
-```text
-┌─────────────────────────────────────┐
-│          GRAPHQL ATTACK LAB         │
-├─────────────────────────────────────┤
-│                                     │
-│  [ Query Depth Attack ]             │
-│  [ Complexity Attack ]              │
-│  [ Introspection Abuse ]            │
-│  [ Alias Abuse ]                    │
-│  [ Batch Abuse ]                    │
-│  [ Rate Limit Attack ]              │
-│                                     │
-└─────────────────────────────────────┘
-```
-
-A simulated attack should produce an end-to-end result:
-
-```text
-Attack
-  ↓
-GraphQL Request
-  ↓
-AST Analysis
-  ↓
-Threat Detection
-  ↓
-Risk Score
-  ↓
-Security Policy
-  ↓
-BLOCK
-  ↓
-Evidence + Explanation
-```
-
-> ⚠️ Attack simulations should only be performed against systems you own or are explicitly authorized to test.
-
----
-
-# 🧾 Explainable Security Decisions
-
-A security system should not simply say:
-
-```text
-BLOCKED
-```
-
-It should explain **why**.
-
-Example:
-
-```text
-Request #8F12A
-
-Decision: BLOCK
-Risk: 94/100
-Confidence: 97%
-
-Triggered signals:
-
-🔴 Excessive query depth
-   Depth = 11
-   Threshold = 7
-
-🔴 Excessive complexity
-   Complexity = 924
-   Threshold = 500
-
-🟠 Behavioral anomaly
-   8.7x above normal complexity
-
-🟠 Rate anomaly
-   4.2x above baseline
-
-Policy:
-HIGH_RISK_QUERY
-
-Action:
-BLOCK
-```
-
-This is particularly useful for:
-
-- Security analysts
-- Developers
-- Incident response
-- Debugging
-- Compliance
-- Security demonstrations
-
----
-
-# 🖥️ Security Dashboard
-
-The web dashboard is designed to provide real-time visibility into GraphQL security.
-
-### Overview
-
-```text
-┌────────────────┬────────────────┬────────────────┐
-│ Requests       │ Threats        │ Blocked        │
-│ 1.24M          │ 3,842          │ 1,291          │
-└────────────────┴────────────────┴────────────────┘
-```
-
-### Security Timeline
-
-```text
-Requests
-  │
-  │          ╭──────╮
-  │     ╭────╯      ╰──────╮
-  │─────╯                   ╰────
-  └────────────────────────────────
-              Time
-```
-
-### Threat Distribution
-
-```text
-Query DoS             ██████████████ 42%
-Introspection         ███████        21%
-Behavioral Anomaly    █████          17%
-Alias Abuse           ███             9%
-Other                 ███            11%
-```
-
-### Useful dashboard views
-
-- Real-time request stream
-- Threat timeline
-- Risk distribution
-- Blocked operations
-- Top suspicious actors
-- API-key activity
-- Query complexity trends
-- Query-depth trends
-- Security events
-- Model predictions
-- Detection explanations
-- System health
-
----
-
-# 🔍 Schema Security Scanner
-
-A future Sentinel scanner can analyze a GraphQL schema before deployment.
-
-Example:
-
-```bash
-sentinel scan schema.graphql
-```
-
-Example output:
-
-```text
-GraphQL Sentinel Schema Scanner
-────────────────────────────────────
-
-Schema: api.graphql
-
-✓ Authentication analysis
-✓ Query complexity analysis
-✓ Mutation analysis
-✓ Introspection analysis
-✓ Recursive relationship analysis
-
-Security Score: 82 / 100
-
-CRITICAL   2
-HIGH       5
-MEDIUM     8
-LOW        3
-```
-
-Example findings:
-
-```text
-HIGH
-Mutation has no visible authorization policy
-
-HIGH
-Recursive relationship may permit expensive traversal
-
-MEDIUM
-Introspection enabled in production configuration
-
-MEDIUM
-Unrestricted pagination argument detected
-```
-
----
-
-# 🧰 CLI
-
-A dedicated CLI makes Sentinel useful outside the dashboard.
-
-Potential commands:
-
-```bash
-sentinel scan schema.graphql
-```
-
-```bash
-sentinel proxy \
-  --target http://localhost:4000/graphql \
-  --port 8080
-```
-
-```bash
-sentinel analyze request.json
-```
-
-```bash
-sentinel replay attack.json
-```
-
-```bash
-sentinel report --format json
-```
-
----
-
-# 📈 Security Metrics
-
-Sentinel should measure more than "number of attacks."
-
-Recommended metrics include:
-
-| Metric | Description |
-|---|---|
-| Detection Rate | Percentage of malicious operations detected |
-| Precision | Percentage of alerts that are actually malicious |
-| Recall | Percentage of malicious operations detected |
-| F1 Score | Combined precision/recall measure |
-| False Positive Rate | Safe requests incorrectly flagged |
-| P50 Latency | Median analysis latency |
-| P95 Latency | 95th percentile analysis latency |
-| P99 Latency | 99th percentile analysis latency |
-| Requests/sec | Gateway throughput |
-| Block Rate | Percentage of requests blocked |
-| Risk Accuracy | Quality of risk classification |
-
-> Do not publish benchmark numbers until they have been measured against a reproducible test dataset.
-
----
-
-# 🧪 Benchmarking
-
-A reproducible benchmark dataset can contain:
-
-```text
-Normal Queries             100,000
-Depth Attacks               10,000
-Complexity Attacks          10,000
-Introspection Attacks       10,000
-Alias Abuse                 10,000
-Batch Abuse                 10,000
-Behavioral Anomalies        10,000
-```
-
-The benchmark pipeline:
-
-```text
-Dataset
-   ↓
-Feature Extraction
-   ↓
-Rule Engine
-   ↓
-ML Engine
-   ↓
-Risk Aggregator
-   ↓
-Predictions
-   ↓
-Precision / Recall / F1
-   ↓
-Latency Benchmark
-```
-
-The goal is to make performance and detection claims **measurable and reproducible**.
-
----
-
-# 🔭 Observability
-
-For production environments, Sentinel should expose observability signals through standard tooling.
-
-```text
-                GraphQL Sentinel
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-        Logs        Metrics       Traces
-          │            │            │
-          └────────────┼────────────┘
-                       ▼
-                OpenTelemetry
-                       │
-              ┌────────┴────────┐
-              ▼                 ▼
-          Prometheus          Grafana
-```
-
-Useful operational metrics:
-
-```text
-sentinel_requests_total
-sentinel_blocked_requests_total
-sentinel_detection_latency_seconds
-sentinel_risk_score
-sentinel_query_complexity
-sentinel_query_depth
-sentinel_anomaly_score
-sentinel_gateway_errors_total
-```
-
----
-
-# 🏗️ Architecture
-
-The repository is organized into distinct backend, dashboard, and machine learning components:
-
-```text
-GraphQL-Sentinel/
-├── .github/workflows/
-│   └── ci.yml                 # Automated backend test workflow
-├── backend/
-│   ├── api/
-│   │   ├── gateway.py         # Reverse proxy gateway & upstream forwarder
-│   │   └── routes.py          # REST endpoints (/analyze, /graphql, /policies)
-│   ├── config/
-│   │   ├── feature_config.json# Feature normalization configuration
-│   │   ├── model_paths.json   # Model checkpoint locations
-│   │   └── settings.yaml      # Security policies & gateway settings
-│   ├── core/
-│   │   ├── features/          # AST structural, semantic & behavioral pipelines
-│   │   ├── models/            # Pre-trained Autoencoder, RF & Ensemble models
-│   │   ├── parser/            # GraphQL AST parser & validation helpers
-│   │   └── security_engine/   # Policy engine, risk scoring & explainability
-│   ├── storage/               # Runtime audit logs (JSONL format)
-│   ├── tests/                 # Core engine & gateway test suite
-│   ├── main.py                # FastAPI application entrypoint
-│   └── requirements.txt       # Backend dependencies
-├── dashboard/                 # React 19 real-time security dashboard
-│   ├── public/                # Static assets and template HTML
-│   ├── src/                   # Components, SSE event stream, charts
-│   ├── tailwind.config.js     # Tailwind CSS styling configuration
-│   └── package.json           # Frontend dependencies & npm scripts
-├── docker/
-│   ├── Dockerfile.backend     # Backend production image
-│   ├── Dockerfile.dashboard   # Dashboard frontend image
-│   └── docker-compose.yml     # Complete stack composition
-├── ml/                        # Training pipelines & synthetic data generators
-├── evaluate_models.py         # Model performance evaluation benchmark
-├── verify_system.py           # End-to-end system verification script
-├── test_tiers.py              # Multi-tier policy and threshold tests
-└── README.md
-```
-
----
-
-# 🧩 Technology Stack
-
-## Backend
-
-- Python
-- FastAPI
-- Pydantic
-- GraphQL parsing / AST tooling
-- Async HTTP stack
-- Machine-learning inference
-
-## Frontend
-
-- React
-- TypeScript
-- Modern dashboard components
-- Interactive charts
-- Real-time security events
-
-## Machine Learning
-
-Potential components include:
-
-- Autoencoder-based anomaly detection
-- Random Forest / tree-based classification
-- Ensemble scoring
-- Behavioral baselines
-- Feature normalization
-- Model evaluation
-
-## Infrastructure
-
-- Docker
-- Docker Compose
-- CI/CD
-- REST APIs
-- GraphQL
-- OpenTelemetry
-- Prometheus
-- Grafana
-
----
-
-# 🔐 Security Model
-
-GraphQL Sentinel follows a defense-in-depth model:
-
-```text
-                    Security
-                       │
-        ┌──────────────┼──────────────┐
-        ▼              ▼              ▼
-      Rules            ML         Behavioral
-        │              │              │
-        └──────────────┼──────────────┘
-                       ▼
-                 Risk Scoring
-                       │
-                       ▼
-              Policy Enforcement
-                       │
-              ┌────────┼────────┐
-              ▼        ▼        ▼
-            Allow    Throttle   Block
-```
-
-Sentinel should complement—not replace:
-
-- Authentication
-- Authorization
-- Secure resolver implementation
-- Input validation
-- Database security
-- Secrets management
-- TLS
-- Network controls
-- Application-level security
-
----
-
-# 🚀 Quick Start
-
-## Prerequisites
-
-Make sure you have:
-
-- Python 3.11+
-- Node.js 18+
-- npm
-- Docker
-- Docker Compose
-- Git
-
----
-
-## Clone the repository
+## Quick start
 
 ```bash
 git clone https://github.com/satyamshrivastav955-dotcom/GraphQL-Sentinel.git
-
 cd GraphQL-Sentinel
-```
-
----
-
-## Backend Setup
-
-Create a virtual environment:
-
-```bash
-python -m venv .venv
-```
-
-Activate it on Linux/macOS:
-
-```bash
-source .venv/bin/activate
-```
-
-Windows (PowerShell):
-
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
-Install backend dependencies:
-
-```bash
 pip install -r backend/requirements.txt
+python scripts/dev.py
 ```
 
-> 💡 **Pre-trained Models**: GraphQL Sentinel ships with pre-trained anomaly detection models (Autoencoder, Random Forest, and Ensemble) located in `backend/core/models/`. You do not need to generate synthetic data or train models before launching the server.
+That builds the dashboard on first run, starts a demo upstream and the gateway, prints a session access token, and opens
+**http://127.0.0.1:8000**: the landing page at `/`, the dashboard at `/app`.
 
-Start the FastAPI gateway **from the repository root** (the application relies on the root-level `backend` package namespace):
+**Try an attack** (the demo upstream is a deliberately unprotected GraphQL server):
 
 ```bash
-uvicorn backend.main:app --reload --port 8000
+# an ordinary query is forwarded; you get the upstream's real data back
+curl -s localhost:8000/graphql-proxy -H 'content-type: application/json' \
+  -d '{"query":"{ users(first: 2) { name } }"}'
 ```
-
-The gateway API and interactive documentation will be available at:
-- Gateway Endpoint: `http://localhost:8000/graphql`
-- Interactive Swagger UI: `http://localhost:8000/docs`
-- Health Check: `http://localhost:8000/health`
-
----
-
-## Dashboard Setup
-
-The interactive security dashboard is built with React 19, TypeScript, Tailwind CSS, and Recharts.
-
-Navigate to the dashboard directory:
-
-```bash
-cd dashboard
-```
-
-Install frontend dependencies:
-
-```bash
-npm install
-```
-
-Start the React development server:
-
-```bash
-npm start
-```
-
-The dashboard will open at:
-
-```text
-http://localhost:3000
-```
-
-### Dashboard Capabilities
-
-- 📊 **Real-Time Telemetry**: Connects to the backend via Server-Sent Events (SSE) to display incoming queries and threat decisions live.
-- ⚡ **Risk Scoring & Breakdown**: Visualizes AST depth, complexity weights, anomaly scores, and individual rule triggers.
-- 🛡️ **Interactive Policy Controls**: Inspect and tune thresholds for query depth, rate limits, and introspection blocking.
-- 🧪 **Live Attack Simulator**: Test defensive reactions against depth attacks, alias overloading, and schema enumeration with one click.
-
----
-
-# 🐳 Docker
-
-Build the project:
-
-```bash
-docker compose build
-```
-
-Start the stack:
-
-```bash
-docker compose up
-```
-
-Run in detached mode:
-
-```bash
-docker compose up -d
-```
-
-Stop:
-
-```bash
-docker compose down
-```
-
----
-
-# 🧪 Running Tests & Verification
-
-Sentinel includes unit tests, integration tests, and verification scripts covering AST parsing, feature extraction, policy decisions, and gateway reverse-proxy behavior.
-
-### 1. Backend Test Suite
-
-Run unit and integration tests with `pytest`:
-
-```bash
-# Ensure test dependencies are installed
-pip install pytest httpx
-
-# Run the test suite with verbose reporting
-python -m pytest backend/tests -v
-```
-
-Continuous integration runs this exact suite on every push and pull request via the [GitHub Actions CI Workflow](.github/workflows/ci.yml).
-
-### 2. End-to-End System Verification
-
-Verify the entire pipeline end-to-end (query parser -> feature pipeline -> ML scorer -> policy engine -> decision logging):
-
-```bash
-python verify_system.py
-```
-
-### 3. Multi-Tier Policy Thresholds
-
-Test policy tier decisions across various query profiles:
-
-```bash
-python test_tiers.py
-```
-
-### 4. Machine Learning Model Evaluation
-
-Benchmark accuracy, precision, and latency across pre-trained anomaly models:
-
-```bash
-python evaluate_models.py
-```
-
----
-
-# ⚡ Example Request
-
-A normal GraphQL request:
-
-```graphql
-query GetUser {
-  user(id: "123") {
-    id
-    name
-    email
-  }
-}
-```
-
-might produce:
-
 ```json
-{
-  "decision": "allow",
-  "risk_score": 8,
-  "confidence": 0.98,
-  "query_depth": 2,
-  "complexity": 24
-}
+{"data":{"users":[{"name":"User 1"},{"name":"User 2"}]},
+ "extensions":{"security":{"decision":"ALLOW","enforced":"forwarded","risk_tier":"SAFE","score":0.0}}}
 ```
-
-A suspicious operation:
-
-```graphql
-query {
-  users {
-    posts {
-      comments {
-        author {
-          posts {
-            comments {
-              author {
-                posts {
-                  comments {
-                    id
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-}
+```bash
+# an 18-level nested query is blocked and never reaches the upstream (HTTP 403)
+curl -s localhost:8000/graphql-proxy -H 'content-type: application/json' \
+  -d '{"query":"{ user(id:\"1\") { friends { friends { friends { friends { friends { friends { friends { friends { friends { friends { friends { friends { friends { friends { friends { friends { friends { name } } } } } } } } } } } } } } } } } } }"}'
 ```
-
-could produce:
-
 ```json
-{
-  "decision": "block",
-  "risk_score": 94,
-  "confidence": 0.97,
-  "query_depth": 11,
-  "complexity": 924,
-  "reasons": [
-    "excessive_query_depth",
-    "high_query_complexity",
-    "behavioral_anomaly"
-  ]
-}
+{"data":null,"errors":[{"message":"Operation blocked by security policy"}],
+ "extensions":{"security":{"decision":"BLOCK","enforced":"blocked","risk_tier":"CRITICAL","score":97.0,"limit_violations":["max_depth>15"]}}}
 ```
 
----
-
-# 📚 API
-
-Example endpoints:
-
-```text
-GET    /health
-GET    /metrics
-
-POST   /analyze
-POST   /graphql
-
-GET    /security/events
-GET    /security/events/{id}
-
-GET    /security/stats
-GET    /security/threats
-
-POST   /policies/validate
-GET    /policies
-
-POST   /schema/scan
-POST   /replay
-```
-
-> Keep this section synchronized with the actual routes implemented in the project.
-
----
-
-# 🧪 Testing
-
-Run unit tests:
+Then run the whole scenario (legitimate, abusive, throttled, audited) as an end-to-end check:
 
 ```bash
-pytest
+SENTINEL_API_TOKEN=<the printed token> python scripts/e2e_check.py
 ```
 
-Run security tests:
+<details>
+<summary><b>Protect your own API</b></summary>
+<br>
 
 ```bash
-pytest tests/security
+export SENTINEL_UPSTREAM_URL=https://api.example.com/graphql   # the one trusted upstream
+export SENTINEL_API_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+export SENTINEL_ENFORCEMENT=shadow                              # record decisions, forward everything
+uvicorn backend.main:app --port 8000
 ```
 
-Run integration tests:
+Roll out safely: run in **shadow mode** first, review what *would* have been blocked in the dashboard and `/metrics`, tune the
+limits, then remove the variable to enforce. Without an upstream the gateway answers `503`; it never fakes a success.
+See [configuration](docs/configuration.md) and the [rollout guide](docs/deployment.md#recommended-rollout-for-a-real-api).
+
+</details>
+
+<details>
+<summary><b>Docker</b> (not yet verified, see <a href="docs/deployment.md">deployment</a>)</summary>
+<br>
 
 ```bash
-pytest tests/integration
+cp .env.example .env        # set SENTINEL_API_TOKEN (>= 16 characters)
+docker compose up --build   # gateway + dashboard on http://localhost:8080
 ```
 
-Run with coverage:
+The compose file, Dockerfiles, nginx and Caddy configs have been reviewed but **never executed** by the author yet. Treat them
+as a starting point and follow the verification steps in [docs/deployment.md](docs/deployment.md).
+
+</details>
+
+<br>
+
+## How it works
+
+<img src="docs/assets/pipeline.svg" alt="Request pipeline: request, limits, parse, features, score, policy, enforce, upstream" width="100%">
+
+| Stage | What happens |
+|---|---|
+| **Limits** | Body size, rate per IP, token budget. A parser that could be crashed by input is itself a target, so these run first. |
+| **Parse and resolve** | A real GraphQL parser builds the AST. Fragments are resolved (memoised, so a fragment bomb costs microseconds, cycles are detected, depth hidden behind fragments is counted). |
+| **Features** | Depth, aliases, fields, directives, introspection, sensitive fields, and a cost model with list-size multipliers. |
+| **Score** | A 0-100 rule score where **every point is attributed to a rule**, blended with a checksummed ML model. Hard limits always block and can only raise severity. |
+| **Policy and enforce** | Risk tier → `ALLOW`, `THROTTLE` (small per-client quota, then `429`) or `BLOCK` (`403`, never forwarded). Shadow mode records the decision but forwards. |
+| **Audit** | One event per request: decision, score, features, explanations, latency. Credentials are redacted; variables are never stored. |
+
+<img src="docs/assets/architecture.svg" alt="Architecture: clients, TLS proxy, the Sentinel gateway with validate, analyze, score and decide stages, and the upstream" width="100%">
+
+<br>
+
+## Results
+
+<img src="docs/assets/results.svg" alt="F1 and false-positive rate for five detection methods" width="100%">
+
+The shipped combination beats limits-only (F1 0.51) and a tuned depth/cost threshold (0.67). The model alone looks perfect
+in-distribution, and that is exactly the trap:
+
+<img src="docs/assets/generalization.svg" alt="Recall on attack categories withheld from training for the model alone, the rules alone and the shipped blend" width="100%">
+
+When a whole attack category is withheld from training, the model alone misses it entirely for several categories
+(field duplication, wide selections), while the rules keep working. That is why the production score is a **blend whose weight was
+chosen on withheld categories**, with rules keeping the final say on very high scores.
+
+> [!IMPORTANT]
+> These are **synthetic** operations from one fictional schema, labelled by generator intent; some design choices were revised after
+> seeing earlier aggregate results (disclosed in the report). They are a development benchmark, **not** a prediction of production
+> accuracy. On 208 real benign GraphQL queries the shipped scorer flags 3.4%.
+> Full tables, methodology and limitations: [docs/evaluation.md](docs/evaluation.md) · [`ml/reports/evaluation.md`](ml/reports/evaluation.md).
+> Regenerate everything with `python -m ml.run`.
+
+**Performance** (single gateway process, load generator on the same machine, [details](docs/performance.md)):
+
+| Concurrency | Throughput | p50 | p95 | Errors |
+|---|---|---|---|---|
+| 1 | 77 req/s | 11 ms | 23 ms | 0 |
+| 4 | 177 req/s | 20 ms | 42 ms | 0 |
+| 32 | 162 req/s | 171 ms (queueing) | 412 ms | 0 |
+
+<br>
+
+## Features
+
+| | |
+|---|---|
+| **Operation-aware analysis** | Real parser, fragment-aware depth/field/alias/cost features, fragment bombs and cycles handled in linear time. |
+| **Explainable decisions** | Every point of the score is attributed; every event shows the rules and feature values behind it. |
+| **Real enforcement** | `BLOCK` never reaches the upstream; `THROTTLE` is a per-client quota with `429` and `Retry-After`; allowed operations return the upstream's real response. |
+| **Safe rollout** | Shadow mode, per-limit configuration, an `allow / flag / block` introspection policy. |
+| **Operations** | Prometheus `/metrics`, Slack-compatible webhook alerts, CSV/JSON export, live event stream, [OpenAPI](docs/openapi.json). |
+| **Hardened by default** | Token-protected management API with lockout, optional API keys for the enforcing endpoint, security headers, fail-closed behaviour, bounded memory, credential redaction. |
+| **Honest evaluation** | Reproducible pipeline, independent confirmation set, leave-one-category-out generalisation, disclosed limitations. |
+
+<br>
+
+## Documentation
+
+| | |
+|---|---|
+| [Architecture](docs/architecture.md) | Request flow, modules, design decisions |
+| [Scoring](docs/scoring.md) | Features, rule points, the model blend, tiers |
+| [API](docs/api.md) · [OpenAPI](docs/openapi.json) | Endpoints, auth, shadow mode, metrics |
+| [Configuration](docs/configuration.md) | Every setting and environment variable |
+| [Deployment](docs/deployment.md) | Security review, rollout, Docker verification, public deployment |
+| [Threat model](docs/threat-model.md) · [SECURITY](SECURITY.md) | What it protects, assumptions, reporting |
+| [Evaluation](docs/evaluation.md) · [Performance](docs/performance.md) | Method, results, load test |
+| [Product readiness](docs/product-readiness.md) | What a real v1 still needs |
+| [Article draft](docs/article-draft.md) · [Demo walkthrough](docs/demo-walkthrough.md) | Write-up and a 3-minute tour |
+
+<details>
+<summary><b>Repository layout</b></summary>
+<br>
+
+| Path | Contents |
+|---|---|
+| `backend/` | FastAPI gateway, analyzer, scoring, limits, policy, runtime stores, tests |
+| `dashboard/` | React + TypeScript landing page and dashboard (Vite) |
+| `ml/` | Dataset generator, training, evaluation, reports, dataset and model cards |
+| `demo/upstream/` | Intentionally unprotected GraphQL server used as the demo target |
+| `scripts/` | `dev.py`, `e2e_check.py`, `loadtest.py`, asset and spec generators |
+| `deploy/`, `docker/` | Caddy TLS overlay, nginx and Dockerfiles (not yet executed) |
+
+</details>
+
+<details>
+<summary><b>Development</b></summary>
+<br>
 
 ```bash
-pytest --cov
+pip install -r backend/requirements-dev.txt
+cd dashboard && npm ci && cd ..
+make check            # ruff, backend tests with the coverage gate, dashboard lint/typecheck/tests/build
+make ml               # retrain and re-evaluate (a few minutes)
+python scripts/build_readme_assets.py   # regenerate the graphics in this README from the real reports
 ```
 
----
+`make help` lists everything. See [CONTRIBUTING](CONTRIBUTING.md).
 
-# 🧠 ML Pipeline
+</details>
 
-The ML pipeline follows:
+<br>
 
-```text
-GraphQL Request
-      │
-      ▼
-AST Parsing
-      │
-      ▼
-Feature Extraction
-      │
-      ├── Depth
-      ├── Complexity
-      ├── Field Count
-      ├── Alias Count
-      ├── Fragment Count
-      ├── Mutation Ratio
-      └── Behavioral Features
-      │
-      ▼
-Feature Normalization
-      │
-      ▼
-ML Models
-      │
-      ├── Anomaly Detection
-      └── Classification
-      │
-      ▼
-Model Scores
-      │
-      ▼
-Risk Aggregator
-      │
-      ▼
-Security Decision
-```
+## Honest limits
 
----
+- **Not production-ready yet.** Docker, nginx and Caddy have never been run; there is no validation on real traffic, rate-limit state is per
+  process, and the management API uses one shared token with no roles. [docs/product-readiness.md](docs/product-readiness.md) lists what a v1 needs.
+- **Not a WAF and not an authorisation layer.** It detects operation-level abuse: nesting, fragments, aliases, cost, introspection, batching.
+  Broken access control and resolver injection are out of scope.
+- **Detection is statistical.** Expect false positives on unusually heavy but legitimate queries; tune the limits to your API and use shadow mode first.
 
-# 🔬 Explainability
+<br>
 
-Machine-learning predictions should be accompanied by interpretable signals.
+## Contributing, security and licence
 
-Instead of:
+Contributions are welcome: see [CONTRIBUTING](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md). Report vulnerabilities privately
+via [SECURITY](SECURITY.md). Source code, documentation and generated reports are [MIT](LICENSE) licensed, copyright (c) 2025-2026
+Satyam Santosh Shrivastav; third-party material is listed in [NOTICE](NOTICE.md) (the NL2GQL test-set file has unverified provenance and is
+excluded from the grant).
 
-```text
-Prediction = malicious
-```
-
-Sentinel should expose:
-
-```text
-Prediction: MALICIOUS
-
-Top contributing signals:
-
-1. Query complexity
-2. Query depth
-3. Request frequency
-4. Behavioral deviation
-5. Operation structure
-```
-
-This improves trust and makes the system easier to debug.
-
----
-
-# 📦 Deployment
-
-A production deployment can look like:
-
-```text
-                       Internet
-                           │
-                           ▼
-                     Load Balancer
-                           │
-                           ▼
-                ┌────────────────────┐
-                │ GraphQL Sentinel   │
-                │     Gateway        │
-                └─────────┬──────────┘
-                          │
-                 ┌────────┴────────┐
-                 ▼                 ▼
-          GraphQL API         Observability
-                 │                 │
-                 ▼          ┌──────┴──────┐
-             Database       ▼             ▼
-                         Metrics        Logs
-```
-
-For horizontal scaling:
-
-```text
-                 Load Balancer
-                      │
-        ┌─────────────┼─────────────┐
-        ▼             ▼             ▼
-    Sentinel-1    Sentinel-2    Sentinel-3
-        │             │             │
-        └─────────────┼─────────────┘
-                      ▼
-              Shared State Store
-```
-
----
-
-# 📋 Roadmap
-
-## Phase 1 — GraphQL Security Core
-
-- [x] GraphQL request analysis
-- [x] Security API
-- [x] Dashboard foundation
-- [ ] AST security analyzer
-- [ ] Query complexity engine
-- [ ] Query depth enforcement
-- [ ] Introspection controls
-- [ ] Alias detection
-- [ ] Fragment analysis
-
-## Phase 2 — Detection Engine
-
-- [ ] Hybrid rule + ML engine
-- [ ] Behavioral baselines
-- [ ] Risk scoring
-- [ ] Explainable predictions
-- [ ] Threat classification
-- [ ] False-positive tracking
-
-## Phase 3 — Gateway
-
-- [ ] Reverse proxy
-- [ ] Allow / throttle / block
-- [ ] Policy-as-code
-- [ ] API-key identity
-- [ ] Rate limiting
-- [ ] Persistent security events
-
-## Phase 4 — Developer Tooling
-
-- [ ] CLI
-- [ ] Schema scanner
-- [ ] Attack replay
-- [ ] Security reports
-- [ ] Python SDK
-- [ ] TypeScript SDK
-
-## Phase 5 — Production
-
-- [ ] OpenTelemetry
-- [ ] Prometheus metrics
-- [ ] Grafana dashboards
-- [ ] Distributed deployment
-- [ ] Performance benchmarks
-- [ ] Security regression suite
-- [ ] Container hardening
-- [ ] SBOM generation
-
----
-
-# 🏆 Project Goals
-
-GraphQL Sentinel aims to become:
-
-### For developers
-
-A simple way to add GraphQL security controls without rewriting their API.
-
-### For security teams
-
-A source of actionable GraphQL security events and behavioral intelligence.
-
-### For researchers
-
-A platform for experimenting with GraphQL anomaly detection and security models.
-
-### For DevOps teams
-
-A deployable gateway with metrics, logging, policy enforcement, and observability.
-
----
-
-# 📊 What Makes Sentinel Different?
-
-Traditional API security often focuses on:
-
-```text
-IP
-│
-├── Request
-├── Endpoint
-└── HTTP metadata
-```
-
-GraphQL Sentinel focuses on:
-
-```text
-Request
-   │
-   ▼
-GraphQL Operation
-   │
-   ├── AST Structure
-   ├── Query Depth
-   ├── Complexity
-   ├── Fields
-   ├── Aliases
-   ├── Fragments
-   ├── Identity
-   ├── Frequency
-   └── Behavioral History
-          │
-          ▼
-      Risk Score
-          │
-          ▼
-       Decision
-```
-
-The objective is to understand **what the API request is actually doing**, not merely where it was sent.
-
----
-
-# 🔒 Responsible Security
-
-GraphQL Sentinel is intended for:
-
-- Defensive security
-- Authorized penetration testing
-- Security research
-- API hardening
-- Development environments
-- Security education
-
-Never use the project against systems you do not own or have explicit authorization to test.
-
-The attack simulation and replay features should only target controlled environments.
-
----
-
-# 🤝 Contributing
-
-Contributions are welcome.
-
-A typical workflow:
-
-```bash
-git checkout -b feature/my-feature
-```
-
-Make your changes, then run:
-
-```bash
-pytest
-```
-
-and:
-
-```bash
-npm test
-```
-
-where applicable.
-
-Commit:
-
-```bash
-git commit -m "feat: add query complexity detection"
-```
-
-Push:
-
-```bash
-git push origin feature/my-feature
-```
-
-Then open a pull request.
-
-### Good first contributions
-
-- Add GraphQL security rules
-- Improve AST feature extraction
-- Add test cases
-- Improve dashboard visualizations
-- Add benchmark datasets
-- Improve documentation
-- Add integrations
-- Improve model explainability
-
----
-
-# 🐛 Reporting Security Issues
-
-Please do not publicly disclose sensitive vulnerabilities before they have been responsibly reported and assessed.
-
-For security-sensitive issues, use the project's private security reporting mechanism where available.
-
----
-
-# 📄 License
-
-This project is distributed under the license specified in the repository's `LICENSE` file.
-
----
-
-# 👨‍💻 Author
-
-### Satyam Shrivastav
-
-Engineering Student & Developer
-
-Building:
-
-> **GraphQL Sentinel — intelligent runtime security for GraphQL APIs.**
-
-GitHub:
-
-**[satyamshrivastav955-dotcom](https://github.com/satyamshrivastav955-dotcom)**
-
-Project:
-
-**[GraphQL-Sentinel](https://github.com/satyamshrivastav955-dotcom/GraphQL-Sentinel)**
-
----
-
-# ⭐ Support the Project
-
-If GraphQL Sentinel is useful to you:
-
-- ⭐ Star the repository
-- 🐛 Report bugs
-- 💡 Suggest features
-- 🔐 Contribute security rules
-- 🧪 Contribute test cases
-- 📚 Improve documentation
-- 🚀 Submit pull requests
-
----
-
-# 🛡️ GraphQL Sentinel
-
-### Detect. Explain. Score. Protect.
-
-```text
-                 ┌─────────────────────┐
-                 │    GRAPHQL QUERY    │
-                 └──────────┬──────────┘
-                            │
-                            ▼
-                 ┌─────────────────────┐
-                 │    AST ANALYSIS     │
-                 └──────────┬──────────┘
-                            │
-                  ┌─────────┴─────────┐
-                  ▼                   ▼
-             RULE ENGINE          ML ENGINE
-                  │                   │
-                  └─────────┬─────────┘
-                            ▼
-                     RISK SCORING
-                            │
-             ┌──────────────┼──────────────┐
-             ▼              ▼              ▼
-           ALLOW         THROTTLE        BLOCK
-                            │
-                            ▼
-                     SECURITY EVENT
-                            │
-                            ▼
-                       DASHBOARD
-```
-
-> **GraphQL Sentinel turns GraphQL security from endpoint protection into operation-level intelligence.**
+<div align="center">
+<br>
+<sub>Built by <a href="https://github.com/satyamshrivastav955-dotcom">Satyam Santosh Shrivastav</a></sub>
+</div>

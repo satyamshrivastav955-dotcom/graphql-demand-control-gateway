@@ -1,0 +1,36 @@
+# Production overlay: puts a TLS-terminating reverse proxy (Caddy) in front of the stack.
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
+#
+# Requires in .env: SENTINEL_API_TOKEN, SENTINEL_DOMAIN (a DNS name pointing at this host),
+# SENTINEL_CORS_ORIGINS=https://<your domain>. Not exercised in CI; see docs/deployment.md.
+# The base file publishes backend/dashboard on 127.0.0.1 only, so only Caddy is reachable from outside.
+
+services:
+  dashboard:
+    volumes:
+      # Makes nginx log/limit by the real client address that Caddy forwards (instead of Caddy's own address).
+      - ./deploy/nginx-realip.conf:/etc/nginx/conf.d/00-realip.conf:ro
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SENTINEL_DOMAIN: ${SENTINEL_DOMAIN:?Set SENTINEL_DOMAIN in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      dashboard:
+        condition: service_healthy
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  caddy-data:
+  caddy-config:

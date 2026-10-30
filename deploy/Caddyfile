@@ -1,0 +1,13 @@
+{$SENTINEL_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Caddy replaces any client-supplied X-Forwarded-For with the real peer address.
+	reverse_proxy dashboard:8080 {
+		flush_interval -1   # do not buffer the /api/live event stream
+	}
+}

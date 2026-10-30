@@ -1,0 +1,69 @@
+# GraphQL Sentinel demo stack:  docker compose up --build
+#   dashboard + gateway  http://localhost:8080
+#   gateway API          http://localhost:8000   (POST /graphql-proxy)
+# The demo upstream is only reachable inside the compose network.
+
+services:
+  upstream:
+    build:
+      context: .
+      dockerfile: docker/demo-upstream.Dockerfile
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    restart: unless-stopped
+    environment:
+      SENTINEL_UPSTREAM_URL: http://upstream:8001/graphql
+      SENTINEL_MODE: proxy
+      # Optional: `shadow` records real decisions but forwards everything (report-only rollout).
+      SENTINEL_ENFORCEMENT: ${SENTINEL_ENFORCEMENT:-enforce}
+      # Optional: Slack-compatible webhook for blocked operations (secret).
+      SENTINEL_ALERT_WEBHOOK_URL: ${SENTINEL_ALERT_WEBHOOK_URL:-}
+      # Optional, comma-separated (each >= 16 chars): require X-API-Key on /graphql-proxy.
+      SENTINEL_GATEWAY_KEYS: ${SENTINEL_GATEWAY_KEYS:-}
+      # Required: protects the management API (events, metrics, config, dry-run, live stream). Min 16 chars.
+      SENTINEL_API_TOKEN: ${SENTINEL_API_TOKEN:?Set SENTINEL_API_TOKEN (min 16 chars) in .env - see .env.example}
+      SENTINEL_INTROSPECTION: ${SENTINEL_INTROSPECTION:-flag}
+      # nginx (the only public entry point) overwrites X-Forwarded-For with the real client address.
+      # The backend port is published on 127.0.0.1 only; do not expose it publicly while this is true.
+      SENTINEL_TRUST_PROXY_HEADERS: ${SENTINEL_TRUST_PROXY_HEADERS:-true}
+      SENTINEL_CORS_ORIGINS: ${SENTINEL_CORS_ORIGINS:-http://localhost:8080}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - sentinel-data:/data
+    depends_on:
+      upstream:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: docker/dashboard.Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  sentinel-data:
