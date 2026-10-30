@@ -1,0 +1,143 @@
+{
+  "name": "sentinel-risk-hist_gradient_boosting",
+  "algorithm": "hist_gradient_boosting",
+  "trained_at": "2026-10-29T20:58:03Z",
+  "seed": 42,
+  "feature_names": [
+    "max_depth",
+    "field_count",
+    "alias_count",
+    "fragment_count",
+    "fragment_spread_count",
+    "directive_count",
+    "introspection_score",
+    "sensitive_field_count",
+    "mutation_score",
+    "complexity_score",
+    "token_count",
+    "query_length",
+    "duplicate_field_count",
+    "max_list_multiplier",
+    "variable_count",
+    "operation_count"
+  ],
+  "sha256": "79ac307445d58868c2a778c7e373c08bc0cda791efb27c9953374109db56b2ce",
+  "sklearn_version": "1.9.0",
+  "python_version": "3.13.13",
+  "dataset": {
+    "version": "1.0",
+    "sizes": {
+      "train": 12866,
+      "val": 4285,
+      "test": 4298
+    },
+    "categories": [
+      "alias_batching",
+      "conditional_fields",
+      "credential_stuffing",
+      "dashboard",
+      "deep_nesting",
+      "directive_overload",
+      "field_duplication",
+      "fragment_bomb",
+      "fragment_depth",
+      "fragment_reuse",
+      "full_profile",
+      "heavy_report",
+      "introspection",
+      "list_amplification",
+      "list_page",
+      "login",
+      "lookup",
+      "mutation",
+      "nested_view",
+      "sensitive_enumeration",
+      "typename",
+      "variables",
+      "wide_selection"
+    ]
+  },
+  "model_selection": {
+    "logistic_regression": {
+      "val_average_precision": 0.9513427760422954,
+      "val_roc_auc": 0.9486549870092538,
+      "val_loco": {
+        "precision": 0.4475,
+        "recall": 0.0827,
+        "f1": 0.1396,
+        "fpr": 0.092
+      },
+      "predict_us_single_row": 1502.6
+    },
+    "random_forest": {
+      "val_average_precision": 0.9999512839393885,
+      "val_roc_auc": 0.9999556562718852,
+      "val_loco": {
+        "precision": 0.997,
+        "recall": 0.5219,
+        "f1": 0.6852,
+        "fpr": 0.0014
+      },
+      "predict_us_single_row": 11371.2
+    },
+    "hist_gradient_boosting": {
+      "val_average_precision": 0.9999681049325748,
+      "val_roc_auc": 0.9999716025386456,
+      "val_loco": {
+        "precision": 0.9962,
+        "recall": 0.5258,
+        "f1": 0.6883,
+        "fpr": 0.0018
+      },
+      "predict_us_single_row": 4560.5
+    }
+  },
+  "recommended_ml_weight": 0.4,
+  "ml_weight_sweep": [
+    {
+      "ml_weight": 0.0,
+      "precision": 0.683,
+      "recall": 0.8858,
+      "f1": 0.7713,
+      "fpr": 0.3705
+    },
+    {
+      "ml_weight": 0.2,
+      "precision": 0.7074,
+      "recall": 0.8587,
+      "f1": 0.7758,
+      "fpr": 0.32
+    },
+    {
+      "ml_weight": 0.4,
+      "precision": 0.7666,
+      "recall": 0.8188,
+      "f1": 0.7919,
+      "fpr": 0.2246
+    },
+    {
+      "ml_weight": 0.6,
+      "precision": 0.7973,
+      "recall": 0.7582,
+      "f1": 0.7773,
+      "fpr": 0.1738
+    },
+    {
+      "ml_weight": 0.8,
+      "precision": 0.7973,
+      "recall": 0.7592,
+      "f1": 0.7778,
+      "fpr": 0.1739
+    },
+    {
+      "ml_weight": 1.0,
+      "precision": 0.7973,
+      "recall": 0.7592,
+      "f1": 0.7778,
+      "fpr": 0.174
+    }
+  ],
+  "decision_threshold": 0.5,
+  "intended_use": "Second opinion on GraphQL operation abuse risk, blended with transparent rules.",
+  "limitations": "Trained on synthetic operations from a fictional schema; does not generalise to unseen abuse categories on its own (see ml/reports/evaluation.md); not validated on production traffic."
+}

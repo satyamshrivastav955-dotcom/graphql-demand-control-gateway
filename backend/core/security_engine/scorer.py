@@ -1,217 +1,139 @@
-import joblib
-import os
+"""Risk scoring: transparent rules blended with an optional trained classifier.
+
+    blended = (1 - w) * rule_score + w * 100 * ml_probability
+    score   = max(blended, rule_score)   if rule_score > high_risk threshold
+            = blended                    otherwise
+
+A very high rule score is therefore never diluted by the ML model, and if the model
+is missing, incompatible or fails, the score falls back to the rule score alone.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
 import logging
+import os
+from typing import Dict, Optional
+
+import joblib
+import numpy as np
+from threadpoolctl import threadpool_limits
+
+from ..analysis import FEATURE_NAMES, vector
+from ..config import PolicySettings
+from . import rules
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "risk_model.joblib")
+
+
+def tier_for(score: float, thresholds) -> str:
+    if score <= thresholds.safe:
+        return "SAFE"
+    if score <= thresholds.low_risk:
+        return "LOW_RISK"
+    if score <= thresholds.medium_risk:
+        return "MEDIUM_RISK"
+    if score <= thresholds.high_risk:
+        return "HIGH_RISK"
+    return "CRITICAL"
+
+
+class RiskModel:
+    """A trained classifier plus its metadata; verified against a recorded SHA-256."""
+
+    def __init__(self, path: str):
+        self.path = path
+        self.meta: Dict = {}
+        self.model = None
+        self.error: Optional[str] = None
+        self._load()
+
+    @property
+    def loaded(self) -> bool:
+        return self.model is not None
+
+    def _load(self) -> None:
+        meta_path = os.path.splitext(self.path)[0] + ".json"
+        try:
+            with open(meta_path, encoding="utf-8") as fh:
+                self.meta = json.load(fh)
+            with open(self.path, "rb") as fh:
+                digest = hashlib.sha256(fh.read()).hexdigest()
+            if digest != self.meta.get("sha256"):
+                raise ValueError("model checksum does not match its metadata")
+            if list(self.meta.get("feature_names", [])) != list(FEATURE_NAMES):
+                raise ValueError("model feature schema does not match the analyzer")
+            self.model = joblib.load(self.path)
+            # Single-row inference: OpenMP thread start-up costs far more than it saves. Applied once,
+            # process-wide (a per-call limit costs ~50 ms).
+            threadpool_limits(limits=1)
+            logger.info("Loaded risk model %s", self.meta.get("name"))
+        except FileNotFoundError:
+            self.error = "model file not found"
+            logger.warning("Risk model not found at %s; using rules only", self.path)
+        except Exception as exc:  # noqa: BLE001 - any load failure must degrade to rules-only
+            self.error = str(exc)
+            logger.error("Risk model disabled: %s", exc)
+
+    def predict(self, features: Dict[str, float]) -> Optional[float]:
+        if not self.loaded:
+            return None
+        try:
+            return float(self.model.predict_proba(np.asarray([vector(features)]))[0][1])
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Model inference failed: %s", exc)
+            return None
+
+
 class SecurityScorer:
-    """
-    Multi-Model Security Scorer for GraphQL Queries
-    
-    Implements 5-tier risk classification (config-driven):
-    - SAFE (0-safe_threshold): Normal traffic
-    - LOW RISK (safe_threshold+1 - low_risk_threshold): Heavy but normal
-    - MEDIUM RISK (low_risk_threshold+1 - medium_risk_threshold): Suspicious
-    - HIGH RISK (medium_risk_threshold+1 - high_risk_threshold): Likely attack
-    - CRITICAL (high_risk_threshold+1 - 100): Confirmed attack
-    """
-    
-    def __init__(self, model_paths: dict, config: dict = None):
-        self.model_paths = model_paths
-        self.config = config or {}
-        self.models = {}
-        
-        # Load tier thresholds from config
-        tier_config = self.config.get('security', {}).get('policy', {}).get('risk_tier_thresholds', {})
-        self.tier_thresholds = {
-            'safe': tier_config.get('safe', 20),
-            'low_risk': tier_config.get('low_risk', 40),
-            'medium_risk': tier_config.get('medium_risk', 65),
-            'high_risk': tier_config.get('high_risk', 85),
+    def __init__(self, policy: Optional[PolicySettings] = None, introspection: str = "flag",
+                 model_path: Optional[str] = None, use_model: bool = True, model: Optional[RiskModel] = None):
+        self.policy = policy or PolicySettings()
+        self.introspection = introspection
+        if model is not None:
+            self.model: Optional[RiskModel] = model
+        else:
+            self.model = RiskModel(model_path or DEFAULT_MODEL_PATH) if use_model else None
+
+    @property
+    def model_loaded(self) -> bool:
+        return bool(self.model and self.model.loaded)
+
+    @property
+    def weight(self) -> float:
+        """Effective ML blend weight: explicit setting, else the model's recommendation, else 0.4."""
+        if self.policy.ml_weight is not None:
+            return self.policy.ml_weight
+        meta = self.model.meta if self.model else {}
+        return float(meta.get("recommended_ml_weight", 0.4))
+
+    def combine(self, rule_score: float, ml: Optional[float]) -> float:
+        """Blend a rule score (0-100) with an ML probability (0-1); see the module docstring."""
+        if ml is None:
+            return rule_score
+        w = self.weight
+        score = (1 - w) * rule_score + w * 100.0 * ml
+        if rule_score > self.policy.risk_tier_thresholds.high_risk:
+            score = max(score, rule_score)
+        return max(0.0, min(100.0, score))
+
+    def score(self, features: Dict[str, float], behavior: Optional[Dict[str, float]] = None) -> dict:
+        rule_score, explanations = rules.evaluate(features, self.introspection, behavior)
+        ml = self.model.predict(features) if self.model else None
+        w = self.weight
+        score = round(self.combine(rule_score, ml), 1)
+        if ml is not None and ml >= 0.5:
+            explanations.append({
+                "rule": "ml_model", "feature": "ml_probability", "value": round(ml, 3),
+                "points": round(w * 100.0 * ml, 1), "severity": "medium" if ml < 0.9 else "high",
+                "description": f"Trained classifier rates this operation {ml:.0%} likely abusive",
+            })
+        return {
+            "rule_score": rule_score,
+            "ml_score": None if ml is None else round(ml, 4),
+            "score": score,
+            "risk_tier": tier_for(score, self.policy.risk_tier_thresholds),
+            "explanations": explanations,
         }
-        
-        self.load_models()
-
-    def load_models(self):
-        for name, path in self.model_paths.items():
-            if os.path.exists(path):
-                try:
-                    self.models[name] = joblib.load(path)
-                    logger.info(f"Loaded model {name} from {path}")
-                except Exception as e:
-                    logger.error(f"Failed to load model {name}: {e}")
-            else:
-                logger.warning(f"Model {name} not found at {path}. Using fallback.")
-
-    def score(self, features: dict) -> dict:
-        """
-        Score a query based on extracted features.
-        Returns scores from individual models and final ensemble score.
-        """
-        scores = {}
-        
-        # Extract key features
-        depth = features.get('max_depth', 0)
-        breadth = features.get('field_count', 0)
-        length = features.get('query_length', 0)
-        introspection = features.get('introspection_score', 0)
-        alias_count = features.get('alias_count', 0)
-        fragment_count = features.get('fragment_count', 0)
-        directive_count = features.get('directive_count', 0)
-        sensitive_fields = features.get('sensitive_field_count', 0)
-        mutation_score = features.get('mutation_score', 0)
-        cost_estimate = features.get('cost_estimate', 0)
-        injection_score = features.get('injection_score', 0.0)
-        circular_fragment = features.get('circular_fragment_detected', 0)
-        directive_abuse = features.get('directive_abuse_detected', 0)
-        
-        # ========== PURE HEURISTIC SCORING (More Reliable) ==========
-        # Start with base score of 0
-        base_score = 0.0
-        
-        # 1. INTROSPECTION CHECK (MEDIUM RISK minimum: 41-65)
-        if introspection > 0:
-            base_score += 48  # Pushes to MEDIUM_RISK (41-65)
-        
-        # 2. DEPTH ANALYSIS
-        if depth <= 3:
-            base_score += 0  # Normal SAFE
-        elif depth <= 5:
-            base_score += 5  # SAFE
-        elif depth <= 8:
-            base_score += 18 + (depth - 5) * 5  # Depth 6: 23, Depth 7: 28, Depth 8: 33 -> LOW_RISK
-        elif depth <= 12:
-            base_score += 52 + (depth - 8) * 8  # Depth 9: 60, Depth 10: 68, Depth 11: 76 -> HIGH_RISK
-        else:
-            base_score += 72 + (depth - 12) * 5  # Depth 15: 87 -> CRITICAL
-        
-        # 3. ALIAS ABUSE (Batching attack)
-        if alias_count > 3:
-            base_score += 20 + (alias_count - 3) * 10  # 8 aliases: 70 -> HIGH_RISK
-        
-        # 4. FIELD COUNT & PAGINATION MULTIPLIERS (Resource exhaustion)
-        max_mult = features.get('max_multiplier', 1)
-        if breadth >= 8 and depth <= 5 and alias_count <= 3:
-            base_score += 20 + (breadth - 8) * 1  # Shallow query with many fields -> LOW_RISK
-        elif max_mult >= 100:
-            base_score += 22  # High pagination limit on list -> LOW_RISK
-
-        # 4b. DIRECTIVE-BASED COMPLEXITY & COST OVERLOAD
-        if cost_estimate >= 5000:
-            base_score += 65.0  # Massive resource cost -> HIGH_RISK
-        elif cost_estimate >= 1000:
-            base_score += 30.0  # Substantial query cost
-        
-        # 5. SENSITIVE FIELD ACCESS
-        if sensitive_fields > 0:
-            base_score += sensitive_fields * 15
-        
-        # 6. MUTATION WITH SENSITIVE FIELDS
-        if mutation_score > 0:
-            base_score += 15
-            if sensitive_fields > 0:
-                base_score += 25  # Dangerous combo
-        
-        # 7. FRAGMENT ABUSE
-        if fragment_count > 2:
-            base_score += fragment_count * 8
-
-        # 7b. RECURSIVE FRAGMENT LOOPS & DIRECTIVE OVERLOAD
-        if circular_fragment > 0:
-            base_score += 90.0  # Immediate CRITICAL tier for circular recursion
-        if directive_abuse > 0:
-            base_score += 55.0  # Directive overload attack
-        
-        # 8. ARGUMENT INJECTION ATTACKS (SQLi, NoSQLi, XSS, CMDi)
-        if injection_score > 0:
-            base_score += 70 + int(injection_score * 25)  # Direct CRITICAL tier (70-95)
-        
-        # 9. MULTI-VECTOR ATTACK DETECTION
-        attack_signals = 0
-        if introspection > 0: attack_signals += 1
-        if depth >= 8: attack_signals += 1
-        if alias_count > 5: attack_signals += 1
-        if fragment_count > 2: attack_signals += 1
-        if sensitive_fields > 0: attack_signals += 1
-        if injection_score > 0: attack_signals += 2
-        if circular_fragment > 0: attack_signals += 2
-        if directive_abuse > 0: attack_signals += 1
-        if cost_estimate >= 2000: attack_signals += 1
-        
-        if attack_signals >= 2:
-            base_score += 20  # Multi-vector attack confirmation boost
-        
-        # ========== ML MODEL INFERENCE & INTEGRATION ==========
-        ae_score = 0.0
-        if 'autoencoder' in self.models:
-            try:
-                X_ae = [[depth, length]]
-                X_pred = self.models['autoencoder'].predict(X_ae)
-                mse = ((X_ae[0][0] - X_pred[0][0])**2 + (X_ae[0][1] - X_pred[0][1])**2) / 2
-                ae_score = round(min(1.0, mse / 100), 3)
-                scores['autoencoder'] = ae_score
-            except Exception as e:
-                logger.debug(f"Autoencoder scoring error: {e}")
-                scores['autoencoder'] = 0.0
-        else:
-            scores['autoencoder'] = 0.0
-
-        # Random Forest with named features
-        rf_score = 0.0
-        if 'random_forest' in self.models:
-            try:
-                import pandas as pd
-                X_rf = pd.DataFrame(
-                    [[depth, length, 1 if introspection > 0 else 0]],
-                    columns=['depth', 'length', 'introspection']
-                )
-                probs = self.models['random_forest'].predict_proba(X_rf)
-                rf_score = round(float(probs[0][1]), 3)
-                scores['random_forest'] = rf_score
-            except Exception as e:
-                logger.debug(f"Random Forest scoring error: {e}")
-                scores['random_forest'] = 0.0
-        else:
-            scores['random_forest'] = 0.0
-
-        # Ensemble Logistic Regression model integration
-        ensemble_ml_score = max(ae_score, rf_score)
-        if 'ensemble' in self.models:
-            try:
-                probs = self.models['ensemble'].predict_proba([[ae_score, rf_score]])
-                ensemble_ml_score = round(float(probs[0][1]), 3)
-            except Exception as e:
-                logger.debug(f"Ensemble model scoring error: {e}")
-
-        # LSTM and GNN placeholders
-        scores['lstm'] = 0.0
-        scores['gnn'] = 0.0
-
-        # ========== HYBRID FINAL SCORE CALCULATION ==========
-        # Deterministic rules guarantee zero false-negatives on high-severity attacks.
-        # ML model detects structural/behavioral shifts on borderline queries.
-        if base_score >= 60.0:
-            final_score = base_score
-        else:
-            ml_impact = ensemble_ml_score * 40.0
-            # Blend: base score augmented by ML anomaly signals
-            final_score = max(base_score, (base_score * 0.8) + (ml_impact * 0.2))
-
-        final_score = min(100.0, max(0.0, final_score))
-        scores['ensemble_score'] = round(final_score, 1)
-
-        # ========== RISK TIER (Config-driven) ==========
-        if final_score <= self.tier_thresholds['safe']:
-            scores['risk_tier'] = 'SAFE'
-        elif final_score <= self.tier_thresholds['low_risk']:
-            scores['risk_tier'] = 'LOW_RISK'
-        elif final_score <= self.tier_thresholds['medium_risk']:
-            scores['risk_tier'] = 'MEDIUM_RISK'
-        elif final_score <= self.tier_thresholds['high_risk']:
-            scores['risk_tier'] = 'HIGH_RISK'
-        else:
-            scores['risk_tier'] = 'CRITICAL'
-
-        logger.debug(f"Final Score={final_score}, Tier={scores['risk_tier']}, ML={ensemble_ml_score}")
-
-        return scores
