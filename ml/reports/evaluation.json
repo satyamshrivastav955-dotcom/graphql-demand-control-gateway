@@ -1,0 +1,735 @@
+{
+  "generated_at": "2026-10-29T20:58:46Z",
+  "seed": 42,
+  "dataset": {
+    "version": "1.0",
+    "n_train": 12866,
+    "n_val": 4285,
+    "n_test": 4298,
+    "attack_ratio_test": 0.4739,
+    "categories": [
+      "alias_batching",
+      "conditional_fields",
+      "credential_stuffing",
+      "dashboard",
+      "deep_nesting",
+      "directive_overload",
+      "field_duplication",
+      "fragment_bomb",
+      "fragment_depth",
+      "fragment_reuse",
+      "full_profile",
+      "heavy_report",
+      "introspection",
+      "list_amplification",
+      "list_page",
+      "login",
+      "lookup",
+      "mutation",
+      "nested_view",
+      "sensitive_enumeration",
+      "typename",
+      "variables",
+      "wide_selection"
+    ]
+  },
+  "methods": [
+    {
+      "name": "Hard limits only",
+      "description": "Gateway limits (depth, aliases, cost, size, tokens) with no scoring - what a limits-only gateway does.",
+      "precision": 0.7584,
+      "recall": 0.3883,
+      "f1": 0.5136,
+      "fpr": 0.1115,
+      "confusion": {
+        "tp": 791,
+        "fp": 252,
+        "tn": 2009,
+        "fn": 1246
+      },
+      "roc_auc": null,
+      "pr_auc": null,
+      "enforced_recall": 0.3883,
+      "enforced_fpr": 0.1115,
+      "latency_us_p50": 4677.4,
+      "latency_us_p95": 34228.3
+    },
+    {
+      "name": "Depth/cost threshold",
+      "description": "Single depth and cost thresholds tuned on the validation split.",
+      "precision": 0.524,
+      "recall": 0.9445,
+      "f1": 0.674,
+      "fpr": 0.7731,
+      "confusion": {
+        "tp": 1924,
+        "fp": 1748,
+        "tn": 513,
+        "fn": 113
+      },
+      "roc_auc": null,
+      "pr_auc": null,
+      "enforced_recall": 0.9445,
+      "enforced_fpr": 0.7731,
+      "latency_us_p50": 4677.4,
+      "latency_us_p95": 34228.3
+    },
+    {
+      "name": "Rule scorer",
+      "description": "Transparent rule scorer plus hard limits (no ML).",
+      "precision": 0.68,
+      "recall": 0.8984,
+      "f1": 0.7741,
+      "fpr": 0.3808,
+      "confusion": {
+        "tp": 1830,
+        "fp": 861,
+        "tn": 1400,
+        "fn": 207
+      },
+      "roc_auc": 0.817,
+      "pr_auc": 0.7307,
+      "enforced_recall": 0.7619,
+      "enforced_fpr": 0.2397,
+      "latency_us_p50": 4754.5,
+      "latency_us_p95": 34326.5
+    },
+    {
+      "name": "ML classifier",
+      "description": "Trained classifier alone (probability >= 0.5).",
+      "precision": 0.9975,
+      "recall": 0.999,
+      "f1": 0.9983,
+      "fpr": 0.0022,
+      "confusion": {
+        "tp": 2035,
+        "fp": 5,
+        "tn": 2256,
+        "fn": 2
+      },
+      "roc_auc": 1.0,
+      "pr_auc": 0.9999,
+      "enforced_recall": 0.999,
+      "enforced_fpr": 0.0022,
+      "latency_us_p50": 17914.0,
+      "latency_us_p95": 47735.8
+    },
+    {
+      "name": "Combined (production)",
+      "description": "Rule score blended with the classifier, plus hard limits - the shipped configuration.",
+      "precision": 0.7907,
+      "recall": 0.9941,
+      "f1": 0.8808,
+      "fpr": 0.2371,
+      "confusion": {
+        "tp": 2025,
+        "fp": 536,
+        "tn": 1725,
+        "fn": 12
+      },
+      "roc_auc": 0.8718,
+      "pr_auc": 0.7672,
+      "enforced_recall": 0.8905,
+      "enforced_fpr": 0.188,
+      "latency_us_p50": 18011.7,
+      "latency_us_p95": 47834.0
+    }
+  ],
+  "per_category": [
+    {
+      "category": "alias_batching",
+      "n": 200,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.405,
+        "Depth/cost threshold": 0.995,
+        "Rule scorer": 0.845,
+        "ML classifier": 1.0,
+        "Combined (production)": 1.0
+      }
+    },
+    {
+      "category": "conditional_fields",
+      "n": 200,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.0,
+        "Depth/cost threshold": 0.965,
+        "Rule scorer": 0.005,
+        "ML classifier": 0.0,
+        "Combined (production)": 0.0
+      }
+    },
+    {
+      "category": "credential_stuffing",
+      "n": 144,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.2986,
+        "Depth/cost threshold": 0.8542,
+        "Rule scorer": 1.0,
+        "ML classifier": 1.0,
+        "Combined (production)": 1.0
+      }
+    },
+    {
+      "category": "dashboard",
+      "n": 200,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.005,
+        "Depth/cost threshold": 1.0,
+        "Rule scorer": 0.625,
+        "ML classifier": 0.0,
+        "Combined (production)": 0.42
+      }
+    },
+    {
+      "category": "deep_nesting",
+      "n": 200,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.52,
+        "Depth/cost threshold": 1.0,
+        "Rule scorer": 0.815,
+        "ML classifier": 1.0,
+        "Combined (production)": 1.0
+      }
+    },
+    {
+      "category": "directive_overload",
+      "n": 200,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.095,
+        "Depth/cost threshold": 0.885,
+        "Rule scorer": 0.75,
+        "ML classifier": 1.0,
+        "Combined (production)": 0.965
+      }
+    },
+    {
+      "category": "field_duplication",
+      "n": 199,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.0,
+        "Depth/cost threshold": 0.9497,
+        "Rule scorer": 0.7387,
+        "ML classifier": 1.0,
+        "Combined (production)": 1.0
+      }
+    },
+    {
+      "category": "fragment_bomb",
+      "n": 200,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.655,
+        "Depth/cost threshold": 1.0,
+        "Rule scorer": 1.0,
+        "ML classifier": 1.0,
+        "Combined (production)": 1.0
+      }
+    },
+    {
+      "category": "fragment_depth",
+      "n": 200,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.655,
+        "Depth/cost threshold": 1.0,
+        "Rule scorer": 1.0,
+        "ML classifier": 1.0,
+        "Combined (production)": 1.0
+      }
+    },
+    {
+      "category": "fragment_reuse",
+      "n": 200,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.0,
+        "Depth/cost threshold": 0.995,
+        "Rule scorer": 0.325,
+        "ML classifier": 0.005,
+        "Combined (production)": 0.2
+      }
+    },
+    {
+      "category": "full_profile",
+      "n": 143,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.0,
+        "Depth/cost threshold": 0.7622,
+        "Rule scorer": 0.3497,
+        "ML classifier": 0.0,
+        "Combined (production)": 0.3147
+      }
+    },
+    {
+      "category": "heavy_report",
+      "n": 200,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.81,
+        "Depth/cost threshold": 1.0,
+        "Rule scorer": 0.98,
+        "ML classifier": 0.005,
+        "Combined (production)": 0.965
+      }
+    },
+    {
+      "category": "introspection",
+      "n": 164,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.0,
+        "Depth/cost threshold": 0.7378,
+        "Rule scorer": 1.0,
+        "ML classifier": 1.0,
+        "Combined (production)": 1.0
+      }
+    },
+    {
+      "category": "list_amplification",
+      "n": 200,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.715,
+        "Depth/cost threshold": 1.0,
+        "Rule scorer": 0.84,
+        "ML classifier": 0.99,
+        "Combined (production)": 0.975
+      }
+    },
+    {
+      "category": "list_page",
+      "n": 200,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.135,
+        "Depth/cost threshold": 1.0,
+        "Rule scorer": 0.38,
+        "ML classifier": 0.0,
+        "Combined (production)": 0.165
+      }
+    },
+    {
+      "category": "login",
+      "n": 151,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.0,
+        "Depth/cost threshold": 0.0,
+        "Rule scorer": 0.8742,
+        "ML classifier": 0.0,
+        "Combined (production)": 0.0
+      }
+    },
+    {
+      "category": "lookup",
+      "n": 199,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.0,
+        "Depth/cost threshold": 0.4673,
+        "Rule scorer": 0.0151,
+        "ML classifier": 0.0,
+        "Combined (production)": 0.0
+      }
+    },
+    {
+      "category": "mutation",
+      "n": 168,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.0,
+        "Depth/cost threshold": 0.0,
+        "Rule scorer": 0.0,
+        "ML classifier": 0.0,
+        "Combined (production)": 0.0
+      }
+    },
+    {
+      "category": "nested_view",
+      "n": 200,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.195,
+        "Depth/cost threshold": 1.0,
+        "Rule scorer": 0.61,
+        "ML classifier": 0.005,
+        "Combined (production)": 0.49
+      }
+    },
+    {
+      "category": "sensitive_enumeration",
+      "n": 200,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.14,
+        "Depth/cost threshold": 0.925,
+        "Rule scorer": 0.98,
+        "ML classifier": 1.0,
+        "Combined (production)": 1.0
+      }
+    },
+    {
+      "category": "typename",
+      "n": 200,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.085,
+        "Depth/cost threshold": 0.895,
+        "Rule scorer": 0.275,
+        "ML classifier": 0.01,
+        "Combined (production)": 0.13
+      }
+    },
+    {
+      "category": "variables",
+      "n": 200,
+      "is_attack": false,
+      "detection_rate": {
+        "Hard limits only": 0.03,
+        "Depth/cost threshold": 0.875,
+        "Rule scorer": 0.18,
+        "ML classifier": 0.0,
+        "Combined (production)": 0.085
+      }
+    },
+    {
+      "category": "wide_selection",
+      "n": 130,
+      "is_attack": true,
+      "detection_rate": {
+        "Hard limits only": 0.8538,
+        "Depth/cost threshold": 1.0,
+        "Rule scorer": 0.9923,
+        "ML classifier": 1.0,
+        "Combined (production)": 1.0
+      }
+    }
+  ],
+  "real_world_benign": {
+    "source": "NL2GQL_Testset_V20.1 (cleaned_query, de-duplicated by skeleton)",
+    "n": 208,
+    "false_positive_rate": {
+      "Hard limits only": 0.0,
+      "Depth/cost threshold": 0.25,
+      "Rule scorer": 0.0,
+      "ML classifier": 0.0625,
+      "Combined (production)": 0.0337
+    }
+  },
+  "gateway_overhead": {
+    "p50_ms": 12.31,
+    "p95_ms": 26.49,
+    "baseline_framework_p50_ms": 2.3,
+    "requests_per_second": 59.0,
+    "n": 800,
+    "note": "In-process ASGI client, stub upstream (0 ms), SQLite event write per request; single process."
+  },
+  "generalization": {
+    "description": "Leave-one-attack-category-out: the ML model is retrained without the category and scored on that category's held-out test operations.",
+    "folds": [
+      {
+        "held_out_category": "alias_batching",
+        "n": 200,
+        "ml_recall": 1.0,
+        "rules_recall": 0.845,
+        "combined_recall": 1.0,
+        "ml_fpr": 0.0022,
+        "combined_fpr": 0.2371
+      },
+      {
+        "held_out_category": "credential_stuffing",
+        "n": 144,
+        "ml_recall": 1.0,
+        "rules_recall": 1.0,
+        "combined_recall": 1.0,
+        "ml_fpr": 0.0018,
+        "combined_fpr": 0.2375
+      },
+      {
+        "held_out_category": "deep_nesting",
+        "n": 200,
+        "ml_recall": 0.53,
+        "rules_recall": 0.815,
+        "combined_recall": 0.67,
+        "ml_fpr": 0.0022,
+        "combined_fpr": 0.2366
+      },
+      {
+        "held_out_category": "directive_overload",
+        "n": 200,
+        "ml_recall": 0.395,
+        "rules_recall": 0.75,
+        "combined_recall": 0.82,
+        "ml_fpr": 0.0018,
+        "combined_fpr": 0.2375
+      },
+      {
+        "held_out_category": "field_duplication",
+        "n": 199,
+        "ml_recall": 0.0,
+        "rules_recall": 0.7387,
+        "combined_recall": 0.5377,
+        "ml_fpr": 0.0031,
+        "combined_fpr": 0.2371
+      },
+      {
+        "held_out_category": "fragment_bomb",
+        "n": 200,
+        "ml_recall": 0.545,
+        "rules_recall": 1.0,
+        "combined_recall": 1.0,
+        "ml_fpr": 0.0018,
+        "combined_fpr": 0.2371
+      },
+      {
+        "held_out_category": "fragment_depth",
+        "n": 200,
+        "ml_recall": 1.0,
+        "rules_recall": 1.0,
+        "combined_recall": 1.0,
+        "ml_fpr": 0.0022,
+        "combined_fpr": 0.2375
+      },
+      {
+        "held_out_category": "introspection",
+        "n": 164,
+        "ml_recall": 0.189,
+        "rules_recall": 1.0,
+        "combined_recall": 0.2988,
+        "ml_fpr": 0.0027,
+        "combined_fpr": 0.2371
+      },
+      {
+        "held_out_category": "list_amplification",
+        "n": 200,
+        "ml_recall": 0.005,
+        "rules_recall": 0.84,
+        "combined_recall": 0.725,
+        "ml_fpr": 0.0022,
+        "combined_fpr": 0.2371
+      },
+      {
+        "held_out_category": "sensitive_enumeration",
+        "n": 200,
+        "ml_recall": 1.0,
+        "rules_recall": 0.98,
+        "combined_recall": 1.0,
+        "ml_fpr": 0.0027,
+        "combined_fpr": 0.2375
+      },
+      {
+        "held_out_category": "wide_selection",
+        "n": 130,
+        "ml_recall": 0.0,
+        "rules_recall": 0.9923,
+        "combined_recall": 0.8538,
+        "ml_fpr": 0.0004,
+        "combined_fpr": 0.2362
+      }
+    ]
+  },
+  "confirmation": {
+    "seed": 2718,
+    "n": 20918,
+    "attack_ratio": 0.4739,
+    "removed_overlapping_skeletons": 491,
+    "methods": [
+      {
+        "name": "Hard limits only",
+        "precision": 0.7663,
+        "recall": 0.3866,
+        "f1": 0.5139,
+        "fpr": 0.1062,
+        "confusion": {
+          "tp": 3833,
+          "fp": 1169,
+          "tn": 9835,
+          "fn": 6081
+        },
+        "roc_auc": null,
+        "pr_auc": null
+      },
+      {
+        "name": "Depth/cost threshold",
+        "precision": 0.5167,
+        "recall": 0.9461,
+        "f1": 0.6684,
+        "fpr": 0.7973,
+        "confusion": {
+          "tp": 9380,
+          "fp": 8774,
+          "tn": 2230,
+          "fn": 534
+        },
+        "roc_auc": null,
+        "pr_auc": null
+      },
+      {
+        "name": "Rule scorer",
+        "precision": 0.68,
+        "recall": 0.8943,
+        "f1": 0.7726,
+        "fpr": 0.3791,
+        "confusion": {
+          "tp": 8866,
+          "fp": 4172,
+          "tn": 6832,
+          "fn": 1048
+        },
+        "roc_auc": 0.8194,
+        "pr_auc": 0.735
+      },
+      {
+        "name": "ML classifier",
+        "precision": 0.997,
+        "recall": 0.9982,
+        "f1": 0.9976,
+        "fpr": 0.0027,
+        "confusion": {
+          "tp": 9896,
+          "fp": 30,
+          "tn": 10974,
+          "fn": 18
+        },
+        "roc_auc": 1.0,
+        "pr_auc": 1.0
+      },
+      {
+        "name": "Combined (production)",
+        "precision": 0.7895,
+        "recall": 0.9948,
+        "f1": 0.8803,
+        "fpr": 0.239,
+        "confusion": {
+          "tp": 9862,
+          "fp": 2630,
+          "tn": 8374,
+          "fn": 52
+        },
+        "roc_auc": 0.8754,
+        "pr_auc": 0.7727
+      }
+    ],
+    "note": "Independently generated (different seed); operations sharing a skeleton with the training split were removed. No threshold, weight or model choice used this set."
+  },
+  "tuned_baseline": {
+    "depth": 3,
+    "cost": 25,
+    "val_f1": 0.6739
+  },
+  "ml_weight": {
+    "effective": 0.4,
+    "explicit_override": null,
+    "selection": "pooled leave-one-attack-category-out F1 on the validation split",
+    "validation_sweep": [
+      {
+        "ml_weight": 0.0,
+        "precision": 0.683,
+        "recall": 0.8858,
+        "f1": 0.7713,
+        "fpr": 0.3705
+      },
+      {
+        "ml_weight": 0.2,
+        "precision": 0.7074,
+        "recall": 0.8587,
+        "f1": 0.7758,
+        "fpr": 0.32
+      },
+      {
+        "ml_weight": 0.4,
+        "precision": 0.7666,
+        "recall": 0.8188,
+        "f1": 0.7919,
+        "fpr": 0.2246
+      },
+      {
+        "ml_weight": 0.6,
+        "precision": 0.7973,
+        "recall": 0.7582,
+        "f1": 0.7773,
+        "fpr": 0.1738
+      },
+      {
+        "ml_weight": 0.8,
+        "precision": 0.7973,
+        "recall": 0.7592,
+        "f1": 0.7778,
+        "fpr": 0.1739
+      },
+      {
+        "ml_weight": 1.0,
+        "precision": 0.7973,
+        "recall": 0.7592,
+        "f1": 0.7778,
+        "fpr": 0.174
+      }
+    ]
+  },
+  "model": {
+    "selected": "hist_gradient_boosting",
+    "candidates": {
+      "logistic_regression": {
+        "val_average_precision": 0.9513427760422954,
+        "val_roc_auc": 0.9486549870092538,
+        "val_loco": {
+          "precision": 0.4475,
+          "recall": 0.0827,
+          "f1": 0.1396,
+          "fpr": 0.092
+        },
+        "predict_us_single_row": 1502.6
+      },
+      "random_forest": {
+        "val_average_precision": 0.9999512839393885,
+        "val_roc_auc": 0.9999556562718852,
+        "val_loco": {
+          "precision": 0.997,
+          "recall": 0.5219,
+          "f1": 0.6852,
+          "fpr": 0.0014
+        },
+        "predict_us_single_row": 11371.2
+      },
+      "hist_gradient_boosting": {
+        "val_average_precision": 0.9999681049325748,
+        "val_roc_auc": 0.9999716025386456,
+        "val_loco": {
+          "precision": 0.9962,
+          "recall": 0.5258,
+          "f1": 0.6883,
+          "fpr": 0.0018
+        },
+        "predict_us_single_row": 4560.5
+      }
+    },
+    "sha256": "79ac307445d58868c2a778c7e373c08bc0cda791efb27c9953374109db56b2ce"
+  },
+  "production_path_check": {
+    "n": 400,
+    "agreement": 1.0
+  },
+  "limitations": [
+    "Operations are synthetic, drawn from one fictional schema; labels follow generator intent, not observed attacker behaviour. Results do not predict accuracy on production traffic.",
+    "Attack parameter ranges overlap benign ranges by design, so some errors are irreducible; benign heavy reports and mild attacks look alike at the feature level.",
+    "Rules and generator were written by the same author, so rule recall on in-distribution categories is optimistic; the leave-one-category-out table is the better generalisation signal.",
+    "The real-world benign set (NL2GQL test queries) measures false positives only; it contains no attacks.",
+    "Behavioural features (rate, repetition) and the rate limiters are not part of this offline evaluation.",
+    "Latency figures come from a single development machine and a stub upstream.",
+    "Design-level selection bias: the generator ranges, rule thresholds and default cost limit were revised twice after reviewing aggregate results of earlier runs. The independent confirmation set guards against overfitting to specific samples, not against this; treat the numbers as a development benchmark rather than a blind validation."
+  ],
+  "environment": {
+    "python": "3.13.13",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "cpu": "Intel64 Family 6 Model 191 Stepping 2, GenuineIntel (16 logical cores)",
+    "sklearn": "1.9.0"
+  }
+}

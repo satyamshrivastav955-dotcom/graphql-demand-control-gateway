@@ -1,0 +1,5 @@
+# Needed to rebuild the dataset, retrain the model and regenerate evaluation reports.
+-r ../backend/requirements.txt
+pandas==3.0.3
+pyarrow==24.0.0
+matplotlib==3.11.0

@@ -1,0 +1,197 @@
+{
+  "version": "1.0",
+  "seed": 42,
+  "per_category_requested": 1000,
+  "categories": {
+    "lookup": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 11,
+      "invalid_removed": 0,
+      "kept": 989
+    },
+    "list_page": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "nested_view": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "dashboard": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "fragment_reuse": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "mutation": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 164,
+      "invalid_removed": 0,
+      "kept": 836
+    },
+    "login": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 251,
+      "invalid_removed": 0,
+      "kept": 749
+    },
+    "heavy_report": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "typename": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "variables": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "conditional_fields": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "full_profile": {
+      "label": 0,
+      "generated": 1000,
+      "duplicates_removed": 292,
+      "invalid_removed": 0,
+      "kept": 708
+    },
+    "deep_nesting": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "alias_batching": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "field_duplication": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 5,
+      "invalid_removed": 0,
+      "kept": 995
+    },
+    "fragment_bomb": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "fragment_depth": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "directive_overload": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "introspection": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 183,
+      "invalid_removed": 0,
+      "kept": 817
+    },
+    "sensitive_enumeration": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 3,
+      "invalid_removed": 0,
+      "kept": 997
+    },
+    "list_amplification": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 0,
+      "invalid_removed": 0,
+      "kept": 1000
+    },
+    "credential_stuffing": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 286,
+      "invalid_removed": 0,
+      "kept": 714
+    },
+    "wide_selection": {
+      "label": 1,
+      "generated": 1000,
+      "duplicates_removed": 356,
+      "invalid_removed": 0,
+      "kept": 644
+    }
+  },
+  "sizes": {
+    "train": 12866,
+    "val": 4285,
+    "test": 4298
+  },
+  "attack_ratio": {
+    "train": 0.474,
+    "val": 0.474,
+    "test": 0.4739
+  },
+  "feature_names": [
+    "max_depth",
+    "field_count",
+    "alias_count",
+    "fragment_count",
+    "fragment_spread_count",
+    "directive_count",
+    "introspection_score",
+    "sensitive_field_count",
+    "mutation_score",
+    "complexity_score",
+    "token_count",
+    "query_length",
+    "duplicate_field_count",
+    "max_list_multiplier",
+    "variable_count",
+    "operation_count"
+  ],
+  "split_policy": "stratified by category after skeleton-level de-duplication (no skeleton appears twice)"
+}
