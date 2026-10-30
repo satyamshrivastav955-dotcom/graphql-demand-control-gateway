@@ -1,64 +1,70 @@
-import yaml
-import json
-import os
+import logging
+from contextlib import asynccontextmanager
+from typing import Optional
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.api import routes, gateway
 
-DEFAULT_CONFIG = {
-    "logging": {"save_path": "backend/storage/logs/decisions.jsonl"},
-    "cors": {"allow_origins": ["http://localhost:5173", "http://localhost:3000"]},
-}
+from backend.api import routes
+from backend.api.gateway import GraphQLGateway
+from backend.api.static import mount_dashboard
+from backend.core.config import Settings, load_settings
+from backend.core.runtime.events import EventStore
 
-def load_config():
-    with open("backend/config/settings.yaml", "r") as f:
-        return yaml.safe_load(f) or {}
 
-def load_model_paths():
-    if not os.path.exists("backend/config/model_paths.json"):
-        return {}
-    with open("backend/config/model_paths.json", "r") as f:
-        return json.load(f)
+def create_app(settings: Optional[Settings] = None, gateway: Optional[GraphQLGateway] = None) -> FastAPI:
+    settings = settings or load_settings()
+    logging.basicConfig(level=logging.DEBUG if settings.app.debug else logging.INFO)
 
-app = FastAPI(title="GraphQL Sentinel", version="1.0.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        store = gateway.store if gateway else EventStore(settings.resolved_db_path(), settings.storage.max_events)
+        gw = gateway or GraphQLGateway(settings, store)
+        await gw.startup()
+        app.state.gateway = gw
+        log = logging.getLogger("sentinel")
+        if not settings.api.auth_required:
+            log.warning("Management API authentication is DISABLED (api.auth_required=false); development only")
+        elif not settings.api.token:
+            log.warning("SENTINEL_API_TOKEN is not set: management endpoints return 503 until it is configured")
+        if settings.gateway.mode == "simulation":
+            log.warning("Simulation mode: allowed operations get a fake response; never use in production")
+        yield
+        await gw.shutdown()
+        store.close()
 
-# CORS — origins are configurable via settings.yaml (never wildcard-with-credentials)
-_config = load_config() if os.path.exists("backend/config/settings.yaml") else DEFAULT_CONFIG
-_cors_config = _config.get("cors") or DEFAULT_CONFIG["cors"]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_config.get("allow_origins", DEFAULT_CONFIG["cors"]["allow_origins"]),
-    allow_credentials=bool(_cors_config.get("allow_credentials", True)),
-    allow_methods=_cors_config.get("allow_methods", ["*"]),
-    allow_headers=_cors_config.get("allow_headers", ["*"]),
-)
-
-@app.on_event("startup")
-async def startup_event():
-    config = _config or load_config()
-    model_paths = load_model_paths()
-
-    # Initialize gateway
-    routes.gateway = gateway.GraphQLGateway(config, model_paths)
-
-    # Ensure log directory exists
-    save_path = config.get("logging", {}).get(
-        "save_path", DEFAULT_CONFIG["logging"]["save_path"]
+    app = FastAPI(
+        title=settings.app.name, version=settings.app.version, lifespan=lifespan,
+        docs_url="/docs" if settings.app.debug else None, redoc_url=None,
+        openapi_url="/openapi.json" if settings.app.debug else None,
     )
-    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors.allow_origins,
+        allow_credentials=settings.cors.allow_credentials,
+        allow_methods=settings.cors.allow_methods,
+        allow_headers=settings.cors.allow_headers,
+        expose_headers=["X-Sentinel-Decision", "Retry-After"],
+    )
 
-    # Warm up in-memory telemetry ring buffer from disk
-    from backend.storage.ring_buffer import ring_buffer
-    ring_buffer.load_from_file(save_path)
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        if request.url.path.startswith("/api/"):
+            response.headers.setdefault("Cache-Control", "no-store")
+        return response
 
-@app.on_event("shutdown")
-async def shutdown_event():
-    if routes.gateway:
-        await routes.gateway.close()
+    app.include_router(routes.router)
+    mount_dashboard(app, settings)  # last: API routes always win
+    return app
 
-app.include_router(routes.router)
+
+app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

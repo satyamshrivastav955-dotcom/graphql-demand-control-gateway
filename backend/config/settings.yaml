@@ -1,59 +1,77 @@
+# GraphQL Sentinel settings. Every value can be overridden by an environment
+# variable: SENTINEL_<SECTION>__<KEY> (e.g. SENTINEL_LIMITS__MAX_DEPTH=10) or one of
+# the aliases listed in backend/core/config.py (SENTINEL_UPSTREAM_URL, SENTINEL_MODE, ...).
+
 app:
   name: "GraphQL Sentinel"
   version: "1.0.0"
-  host: "0.0.0.0"
-  port: 8000
-  debug: true
+  debug: false
 
-upstream:
-  # Upstream GraphQL API endpoint. Leave empty for standalone/mock simulation mode.
-  # Can also be overridden with UPSTREAM_GRAPHQL_URL environment variable.
-  url: ""
-  timeout_seconds: 10.0
-  max_connections: 100
-  max_keepalive_connections: 20
+gateway:
+  # proxy: forward allowed operations to `upstream_url`. If no upstream is
+  #        configured the gateway answers 503 instead of faking a response.
+  # simulation: analyse and decide only; allowed operations get a clearly
+  #        labelled simulated response. Never use in production.
+  mode: proxy
+  # enforce | shadow. Shadow records the real decision but forwards everything (report-only rollout).
+  enforcement: enforce
+  upstream_url: null
+  upstream_timeout_seconds: 10
+  max_upstream_response_bytes: 5000000
+  forward_headers: ["authorization", "x-request-id"]
+  # Only enable behind a trusted reverse proxy: client IPs are read from X-Forwarded-For.
+  trust_proxy_headers: false
 
-security:
-  batch:
-    allow_batching: true
-    max_operations: 10
-  policy:
-    default_action: "ALLOW" # ALLOW, THROTTLE, BLOCK
-    thresholds:
-      autoencoder_reconstruction_error: 0.02
-      random_forest_prob: 0.4
-      ensemble_score: 20 # Lowered to catch more attacks
-    risk_tier_thresholds:
-      safe: 20          # 0-20: SAFE
-      low_risk: 40      # 21-40: LOW_RISK
-      medium_risk: 65   # 41-65: MEDIUM_RISK
-      high_risk: 85     # 66-85: HIGH_RISK
-      # 86-100: CRITICAL
-  throttling:
-    rate_limit: 100 # requests per minute
-    window: 60 # seconds
-
-alerts:
-  enabled: false
-  webhook_url: ""
-  min_severity: "CRITICAL"
-  cooldown_seconds: 60
-
-feature_extraction:
+# Hard limits. A violation always results in BLOCK, whatever the risk score.
+limits:
+  max_body_bytes: 100000
+  max_query_length: 20000
   max_depth: 15
   max_aliases: 50
+  max_complexity: 20000
   max_tokens: 5000
 
-logging:
-  level: "INFO"
-  save_path: "backend/storage/logs/decisions.jsonl"
+security:
+  # allow: introspection is not scored | flag: scored as suspicious (default) | block: hard limit
+  introspection: flag
+  policy:
+    # Upper bound (inclusive) of each tier on the 0-100 risk score; above high_risk is CRITICAL.
+    risk_tier_thresholds:
+      safe: 20
+      low_risk: 40
+      medium_risk: 65
+      high_risk: 85
+    tier_actions:
+      SAFE: ALLOW
+      LOW_RISK: ALLOW
+      MEDIUM_RISK: ALLOW
+      HIGH_RISK: THROTTLE
+      CRITICAL: BLOCK
+    # Weight of the ML probability in the blended score (see docs/scoring.md). Leave unset to use the
+    # weight recorded in the model metadata; set a number (0-1) to override it. 0 disables the ML term.
+    # ml_weight: 0.4
+
+throttle:
+  rate_limit: 100          # requests per client per window (all traffic)
+  window_seconds: 60
+  risky_quota: 5           # THROTTLE-tier operations a client may run per window
+  max_tracked_clients: 10000
+
+# Webhook alerts (Slack-compatible JSON) for blocked operations. The URL is a secret: prefer SENTINEL_ALERT_WEBHOOK_URL.
+alerts:
+  webhook_url: null
+  min_decision: BLOCK      # BLOCK | THROTTLE
+  include_query: false     # include (credential-redacted) query text in the alert
+  max_per_minute: 30
+
+storage:
+  db_path: backend/storage/sentinel.db
+  max_events: 50000
 
 cors:
-  # Allowed browser origins for the dashboard/API.
-  # Avoid "*" together with allow_credentials: true.
   allow_origins:
     - "http://localhost:5173"
     - "http://localhost:3000"
-  allow_credentials: true
-  allow_methods: ["*"]
+  allow_credentials: false
+  allow_methods: ["GET", "POST", "OPTIONS"]
   allow_headers: ["*"]

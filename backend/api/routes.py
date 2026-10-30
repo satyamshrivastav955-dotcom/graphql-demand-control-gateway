@@ -1,436 +1,304 @@
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import Optional, Dict, Any, Union, List
-import json
-import os
-import asyncio
-from datetime import datetime, timedelta
-from collections import defaultdict
-from .gateway import GraphQLGateway
+"""HTTP API: the GraphQL proxy plus the dashboard's read endpoints."""
+from __future__ import annotations
 
+import asyncio
+import csv
+import io
+import json
+from collections import Counter, defaultdict
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any, Dict, Optional
+from urllib.parse import urlparse
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
+
+from ..core.config import ROOT
+from .gateway import ClientInfo, GraphQLGateway
 
 router = APIRouter()
-gateway = None  # Initialized in main startup
-
-DEFAULT_LOG_PATH = "backend/storage/logs/decisions.jsonl"
-
-
-class GraphQLRequest(BaseModel):
-    query: str
-    variables: Optional[Dict[str, Any]] = None
-    operationName: Optional[str] = None
+EVALUATION_FILE = ROOT / "ml" / "reports" / "evaluation.json"
+TIERS = ("SAFE", "LOW_RISK", "MEDIUM_RISK", "HIGH_RISK", "CRITICAL")
+DECISIONS = ("ALLOW", "THROTTLE", "BLOCK", "ERROR")
 
 
-from ..storage.ring_buffer import ring_buffer as default_ring_buffer
+def _gw(request: Request) -> GraphQLGateway:
+    gw = getattr(request.app.state, "gateway", None)
+    if gw is None:
+        raise HTTPException(status_code=503, detail="Gateway not initialised")
+    return gw
 
 
-def _get_ring_buffer():
-    if gateway is not None and getattr(gateway, "ring_buffer", None):
-        return gateway.ring_buffer
-    return default_ring_buffer
+def _client(request: Request) -> ClientInfo:
+    gw = _gw(request)
+    ip = request.client.host if request.client else "unknown"
+    if gw.settings.gateway.trust_proxy_headers:
+        fwd = request.headers.get("x-forwarded-for", "")
+        if fwd:
+            ip = fwd.split(",")[0].strip() or ip
+    return ClientInfo(ip=ip, client_id=request.headers.get("x-client-id"), headers=dict(request.headers))
 
 
-def _log_path() -> str:
-    """Single source of truth for the decision log path.
-
-    Prefers the gateway's configured path (from settings.yaml); falls back
-    to the default when the gateway has not been initialized yet.
-    """
-    if gateway is not None:
-        configured = getattr(gateway, "log_path", None)
-        if configured:
-            return configured
-    return DEFAULT_LOG_PATH
+def _admin(request: Request) -> GraphQLGateway:
+    """Authenticate a management-API call and return the gateway."""
+    gw = _gw(request)
+    gw.auth.require(request, _client(request).ip)
+    return gw
 
 
-def read_all_logs():
-    """Retrieve decision logs from memory ring buffer (fast path), falling back to disk if empty."""
-    rb = _get_ring_buffer()
-    if rb.count() > 0:
-        return rb.get_all()
-
-    logs = []
-    log_path = _log_path()
-    if os.path.exists(log_path):
-        with open(log_path, 'r', encoding="utf-8") as f:
-            for line in f:
-                try:
-                    logs.append(json.loads(line.strip()))
-                except (json.JSONDecodeError, ValueError):
-                    continue
-    return logs
+async def _read_json(request: Request, limit: int) -> Any:
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(status_code=413, detail="Request body too large")
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            raise HTTPException(status_code=413, detail="Request body too large")
+        chunks.append(chunk)
+    try:
+        return json.loads(b"".join(chunks) or b"null")
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Request body is not valid JSON") from None
 
 
 @router.post("/graphql-proxy")
-async def graphql_proxy(request: Request, body: Union[GraphQLRequest, List[GraphQLRequest]]):
-    if not gateway:
-        raise HTTPException(status_code=503, detail="Gateway not initialized")
-    
-    client_info = {
-        "client_id": request.headers.get("X-Client-ID", "unknown"),
-        "ip": request.client.host if request.client else "unknown",
-        "user_agent": request.headers.get("User-Agent", "unknown"),
-        "headers": {k.lower(): v for k, v in request.headers.items()}
+async def graphql_proxy(request: Request):
+    gw = _gw(request)
+    # Rejected before the body is read; unauthenticated requests are not recorded as events.
+    gw.auth.require_client_key(request, _client(request).ip)
+    body = await _read_json(request, gw.settings.limits.max_body_bytes)
+    result = await gw.handle(body, _client(request))
+    return JSONResponse(result.body, status_code=result.status, headers=result.headers)
+
+
+@router.post("/api/analyze")
+async def analyze_dry_run(request: Request):
+    """Analyse an operation without forwarding or storing it (authenticated)."""
+    gw = _admin(request)
+    body = await _read_json(request, gw.settings.limits.max_body_bytes)
+    q = body.get("query") if isinstance(body, dict) else None
+    if not isinstance(q, str) or not q.strip():
+        raise HTTPException(status_code=400, detail="A non-empty 'query' string is required")
+    variables = body.get("variables")
+    verdict = gw.evaluate(q, body.get("operationName"), variables if isinstance(variables, dict) else None)
+    if verdict.decision == "ERROR":
+        raise HTTPException(status_code=400, detail=verdict.error or "Invalid GraphQL operation")
+    cfg = gw.settings.gateway
+    return {
+        "decision": verdict.decision, "risk_tier": verdict.risk_tier, "score": verdict.score,
+        "rule_score": verdict.rule_score, "ml_score": verdict.ml_score, "features": verdict.features,
+        "explanations": verdict.explanations, "limit_violations": verdict.limit_violations,
+        "would_forward": verdict.decision != "BLOCK" and (cfg.mode == "simulation" or bool(cfg.upstream_url)),
+        "latency_ms": round(verdict.latency_ms, 3),
     }
-    
-    if isinstance(body, list):
-        result = await gateway.process_batch_request([item.model_dump() for item in body], client_info)
-    else:
-        result = await gateway.process_request(body.model_dump(), client_info)
-    return result
 
 
-@router.get("/api/stream")
-async def get_stream():
-    """Return last N logs for the live stream with sub-millisecond latency."""
-    rb = _get_ring_buffer()
-    if rb.count() > 0:
-        return rb.get_recent(50)
-    logs = read_all_logs()
-    return logs[-50:] if len(logs) > 50 else logs
+@router.get("/api/health")
+async def health():
+    return {"status": "ok"}
 
 
-@router.get("/api/live")
-async def live_stream():
-    """Instant push SSE endpoint backed by ring buffer subscriber queue."""
-    rb = _get_ring_buffer()
-    queue = rb.subscribe()
+@router.get("/api/ready")
+async def ready(request: Request):
+    """Public: local checks only. Authenticated callers also get the upstream probe and check details."""
+    gw = _gw(request)
+    store_ok = gw.store.ping()
+    if not gw.auth.is_authorised(request, _client(request).ip) or not gw.auth.required:
+        # No upstream traffic is generated for unauthenticated callers.
+        public_ok = store_ok and (gw.settings.gateway.mode == "simulation" or bool(gw.settings.gateway.upstream_url))
+        return JSONResponse({"status": "ready" if public_ok else "degraded"}, status_code=200 if store_ok else 503)
+    upstream = await gw.upstream_status()
+    checks = {"model": gw.scorer.model_loaded, "store": store_ok, "upstream": upstream}
+    ok = store_ok and upstream in ("ok", "simulation")
+    return JSONResponse({"status": "ready" if ok else "degraded", "checks": checks},
+                        status_code=200 if store_ok else 503)
 
-    async def event_generator():
-        try:
-            # Send initial backlog of recent events (up to 25)
-            backlog = rb.get_recent(25)
-            if not backlog:
-                backlog = read_all_logs()[-25:]
-            for entry in backlog:
-                yield f"data: {json.dumps(entry)}\n\n"
 
-            while True:
-                try:
-                    entry = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield f"data: {json.dumps(entry)}\n\n"
-                except asyncio.TimeoutError:
-                    # Heartbeat comment to keep SSE connection alive
-                    yield ": keepalive\n\n"
-        except asyncio.CancelledError:
-            pass
-        finally:
-            rb.unsubscribe(queue)
+@router.get("/api/config")
+async def get_config(request: Request):
+    gw = _admin(request)
+    s = gw.settings
+    model = gw.scorer.model
+    meta = model.meta if model and model.loaded else {}
+    host = urlparse(s.gateway.upstream_url).netloc.rsplit("@", 1)[-1] if s.gateway.upstream_url else None
+    return {
+        "version": s.app.version,
+        "mode": s.gateway.mode,
+        "upstream_configured": bool(s.gateway.upstream_url),
+        "client_key_required": gw.auth.client_key_required,
+        "enforcement": s.gateway.enforcement,
+        "alerts_configured": gw.alerts.enabled,
+        "upstream_host": host,
+        "limits": s.limits.model_dump(),
+        "introspection": s.security.introspection,
+        "tiers": s.security.policy.risk_tier_thresholds.model_dump(),
+        "tier_actions": s.security.policy.tier_actions,
+        "throttle": {"rate_limit": s.throttle.rate_limit, "window_seconds": s.throttle.window_seconds,
+                     "risky_quota": s.throttle.risky_quota},
+        "ml_weight": gw.scorer.weight if gw.scorer.model_loaded else 0.0,
+        "model": {"loaded": gw.scorer.model_loaded, "name": meta.get("name"),
+                  "trained_at": meta.get("trained_at"), "n_features": len(meta.get("feature_names", [])) or None},
+    }
 
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-        }
-    )
 
+@router.get("/api/events")
+async def list_events(request: Request, limit: int = Query(50, ge=1, le=500), offset: int = Query(0, ge=0),
+                      decision: Optional[str] = None, tier: Optional[str] = None, q: Optional[str] = None,
+                      sort: str = Query("timestamp", pattern="^(timestamp|score)$"),
+                      order: str = Query("desc", pattern="^(asc|desc)$")):
+    store = _admin(request).store
+    items, total = await asyncio.to_thread(store.list, limit, offset, decision, tier, q, sort, order)
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+CSV_COLUMNS = ("id", "timestamp", "ip", "client_id", "operation_name", "operation_type", "decision", "enforced",
+               "risk_tier", "score", "rule_score", "ml_score", "upstream_status", "latency_ms", "total_latency_ms",
+               "limit_violations", "query")
+
+
+def _csv_cell(value: Any) -> Any:
+    """Neutralise spreadsheet formula injection (cells starting with = + - @ are prefixed with a quote)."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
+@router.get("/api/events/export")
+async def export_events(request: Request, format: str = Query("csv", pattern="^(csv|json)$"),
+                        limit: int = Query(5000, ge=1, le=20000), decision: Optional[str] = None,
+                        tier: Optional[str] = None, q: Optional[str] = None):
+    """Download recent events (newest first) as CSV or JSON. Queries are already credential-redacted."""
+    store = _admin(request).store
+    rows: list = []
+    offset = 0
+    while len(rows) < limit:
+        page, total = await asyncio.to_thread(store.list, min(500, limit - len(rows)), offset, decision, tier, q,
+                                              "timestamp", "desc")
+        rows.extend(page)
+        offset += len(page)
+        if not page or offset >= total:
+            break
+    if format == "json":
+        return JSONResponse({"count": len(rows), "events": rows},
+                            headers={"Content-Disposition": 'attachment; filename="sentinel-events.json"'})
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(CSV_COLUMNS)
+    for e in rows:
+        row = dict(e)
+        row["limit_violations"] = ";".join(e.get("limit_violations") or [])
+        row["query"] = (e.get("query") or "")[:500]
+        writer.writerow([_csv_cell(row.get(c)) for c in CSV_COLUMNS])
+    return PlainTextResponse(buf.getvalue(), media_type="text/csv",
+                             headers={"Content-Disposition": 'attachment; filename="sentinel-events.csv"'})
+
+
+@router.get("/api/events/{event_id}")
+async def get_event(request: Request, event_id: str):
+    store = _admin(request).store
+    event = await asyncio.to_thread(store.get, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    event["client_timeline"] = await asyncio.to_thread(store.client_timeline, event.get("ip") or "")
+    return event
 
 
 @router.get("/api/metrics")
-async def get_metrics():
-    """Comprehensive metrics for the dashboard."""
-    logs = read_all_logs()
-    
-    if not logs:
-        return {
-            "total_queries": 0,
-            "blocked_count": 0,
-            "throttled_count": 0,
-            "high_risk_count": 0,
-            "avg_threat_score": 0,
-            "active_clients": 0,
-            "avg_latency": 0,
-            "attack_rate": 0,
-            "threat_distribution": {
-                "SAFE": 0, "LOW_RISK": 0, "MEDIUM_RISK": 0, "HIGH_RISK": 0, "CRITICAL": 0
-            },
-            "feature_importance": [],
-            "load_over_time": [],
-            "risk_trend": [],
-            "threat_scores_timeline": []
-        }
-    
-    # Basic counts
-    total_queries = len(logs)
-    blocked = sum(1 for l in logs if l.get('decision') == 'BLOCK')
-    throttled = sum(1 for l in logs if l.get('decision') == 'THROTTLE')
-    
-    # Risk tier counts
-    tier_counts = defaultdict(int)
-    for log in logs:
-        tier = log.get('scores', {}).get('risk_tier', 'SAFE')
-        tier_counts[tier] += 1
-    
-    high_risk = tier_counts.get('HIGH_RISK', 0) + tier_counts.get('CRITICAL', 0)
-    
-    # Average threat score
-    scores = [l.get('scores', {}).get('ensemble_score', 0) for l in logs]
-    avg_score = sum(scores) / len(scores) if scores else 0
-    
-    # Active clients
-    clients = set(l.get('client_id', 'unknown') for l in logs)
-    unique_ips = set(l.get('ip', 'unknown') for l in logs)
-    
-    # Average latency
-    latencies = [l.get('latency_ms', 0) for l in logs]
-    avg_latency = sum(latencies) / len(latencies) if latencies else 0
-    
-    # Threat distribution for pie chart
-    threat_distribution = {
-        "SAFE": tier_counts.get('SAFE', 0),
-        "LOW_RISK": tier_counts.get('LOW_RISK', 0),
-        "MEDIUM_RISK": tier_counts.get('MEDIUM_RISK', 0),
-        "HIGH_RISK": tier_counts.get('HIGH_RISK', 0),
-        "CRITICAL": tier_counts.get('CRITICAL', 0)
-    }
-    
-    # Feature importance (aggregate from explanations)
-    feature_scores = defaultdict(float)
-    feature_counts = defaultdict(int)
-    for log in logs:
-        for exp in log.get('explanations', []):
-            feature = exp.get('feature', 'unknown')
-            score = exp.get('score', 0)
-            feature_scores[feature] += score
-            feature_counts[feature] += 1
-    
-    # Also aggregate from features for more data
-    feature_keys = ['max_depth', 'field_count', 'alias_count', 'introspection_score', 
-                    'sensitive_field_count', 'mutation_score', 'complexity_score']
-    for log in logs:
-        features = log.get('features', {})
-        for key in feature_keys:
-            val = features.get(key, 0)
-            if val > 0:
-                feature_scores[key] += val
-                feature_counts[key] += 1
-    
-    feature_importance = [
-        {"feature": k, "impact": feature_scores[k] / feature_counts[k] if feature_counts[k] > 0 else 0, "count": feature_counts[k]}
-        for k in feature_scores.keys()
-    ]
-    feature_importance.sort(key=lambda x: x['impact'], reverse=True)
-    
-    # Load over time (group by minute)
-    load_by_minute = defaultdict(lambda: {"total": 0, "allowed": 0, "blocked": 0, "throttled": 0})
-    for log in logs:
-        ts = log.get('timestamp', '')
-        try:
-            dt = datetime.fromisoformat(ts)
-            minute_key = dt.strftime('%H:%M')
-            load_by_minute[minute_key]["total"] += 1
-            decision = log.get('decision', 'ALLOW')
-            if decision == 'ALLOW':
-                load_by_minute[minute_key]["allowed"] += 1
-            elif decision == 'BLOCK':
-                load_by_minute[minute_key]["blocked"] += 1
-            elif decision == 'THROTTLE':
-                load_by_minute[minute_key]["throttled"] += 1
-        except (ValueError, TypeError):
-            continue
-    
-    load_over_time = [{"time": k, **v} for k, v in sorted(load_by_minute.items())[-20:]]
-    
-    # Risk trend over time
-    risk_by_minute = defaultdict(lambda: {"SAFE": 0, "LOW_RISK": 0, "MEDIUM_RISK": 0, "HIGH_RISK": 0, "CRITICAL": 0})
-    for log in logs:
-        ts = log.get('timestamp', '')
-        tier = log.get('scores', {}).get('risk_tier', 'SAFE')
-        try:
-            dt = datetime.fromisoformat(ts)
-            minute_key = dt.strftime('%H:%M')
-            risk_by_minute[minute_key][tier] += 1
-        except (ValueError, TypeError):
-            continue
-    
-    risk_trend = [{"time": k, **v} for k, v in sorted(risk_by_minute.items())[-20:]]
-    
-    # Threat scores timeline
-    threat_scores_timeline = []
-    for log in logs[-100:]:  # Last 100 entries
-        ts = log.get('timestamp', '')
-        score = log.get('scores', {}).get('ensemble_score', 0)
-        try:
-            dt = datetime.fromisoformat(ts)
-            threat_scores_timeline.append({
-                "time": dt.strftime('%H:%M:%S'),
-                "score": round(score, 2)
-            })
-        except (ValueError, TypeError):
-            continue
-    
+async def metrics(request: Request, minutes: int = Query(60, ge=1, le=1440)):
+    store = _admin(request).store
+    since = (datetime.now(UTC) - timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    rows = await asyncio.to_thread(store.window, since)
+    decisions = Counter(r["decision"] for r in rows)
+    tiers = Counter(r["risk_tier"] for r in rows if r["risk_tier"])
+    scores = [r["score"] for r in rows if r["score"] is not None]
+    lat = sorted(r["latency_ms"] for r in rows if r["latency_ms"] is not None)
+    total = len(rows)
+
+    buckets: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "allowed": 0, "throttled": 0, "blocked": 0})
+    signals: Counter = Counter()
+    for r in rows:
+        b = buckets[r["timestamp"][11:16]]
+        b["total"] += 1
+        key = {"ALLOW": "allowed", "THROTTLE": "throttled", "BLOCK": "blocked"}.get(r["decision"])
+        if key:
+            b[key] += 1
+        if r["risk_tier"] in ("MEDIUM_RISK", "HIGH_RISK", "CRITICAL"):
+            for e in json.loads(r["explanations"] or "[]"):
+                if e.get("points", 0) > 0 or e.get("rule") == "hard_limit":
+                    signals[e["rule"]] += 1
+
+    items, _ = await asyncio.to_thread(store.list, 200, 0, None, None, None, "timestamp", "desc")
+    suspicious = [e for e in items if e["decision"] in ("BLOCK", "THROTTLE")
+                  or e["risk_tier"] in ("MEDIUM_RISK", "HIGH_RISK", "CRITICAL")][:8]
     return {
-        "total_queries": total_queries,
-        "blocked_count": blocked,
-        "throttled_count": throttled,
-        "high_risk_count": high_risk,
-        "avg_threat_score": round(avg_score, 2),
-        "active_clients": len(clients) + len(unique_ips) - 1,  # Unique entities
-        "avg_latency": round(avg_latency, 2),
-        "attack_rate": round(blocked / total_queries, 4) if total_queries > 0 else 0,
-        "threat_distribution": threat_distribution,
-        "feature_importance": feature_importance[:10],
-        "load_over_time": load_over_time,
-        "risk_trend": risk_trend,
-        "threat_scores_timeline": threat_scores_timeline
+        "total_queries": total,
+        "allowed_count": decisions["ALLOW"], "throttled_count": decisions["THROTTLE"],
+        "blocked_count": decisions["BLOCK"], "error_count": decisions["ERROR"],
+        "avg_score": round(sum(scores) / len(scores), 2) if scores else 0,
+        "avg_latency_ms": round(sum(lat) / len(lat), 3) if lat else 0,
+        "p95_latency_ms": round(lat[int(0.95 * (len(lat) - 1))], 3) if lat else 0,
+        "block_rate": round(decisions["BLOCK"] / total, 4) if total else 0,
+        "active_clients": len({r["ip"] for r in rows}),
+        "tier_distribution": {t: tiers[t] for t in TIERS},
+        "decision_distribution": {d: decisions[d] for d in DECISIONS},
+        "load_over_time": [{"time": k, **v} for k, v in sorted(buckets.items())][-60:],
+        "top_signals": [{"rule": k, "count": v} for k, v in signals.most_common(8)],
+        "recent_suspicious": suspicious,
     }
-
-
-@router.get("/api/query/{query_id}")
-async def get_query_details(query_id: str):
-    """Get detailed information about a specific query by ID with O(1) buffer lookup."""
-    rb = _get_ring_buffer()
-    log = rb.get_by_id(query_id)
-    log_index = 0
-
-    if not log:
-        logs = read_all_logs()
-        for idx, entry in enumerate(logs):
-            if entry.get('id') == query_id:
-                log = entry
-                log_index = idx
-                break
-    
-    if not log:
-        raise HTTPException(status_code=404, detail="Query not found")
-    
-    # Get client behavior (last 10 scores from same client)
-    client_id = log.get('client_id', 'unknown')
-    all_entries = rb.get_all() or read_all_logs()
-    client_logs = [l for l in all_entries if l.get('client_id') == client_id][-10:]
-    client_timeline = [
-        {
-            "time": l.get('timestamp', '')[-8:],  # HH:MM:SS
-            "score": l.get('scores', {}).get('ensemble_score', 0)
-        }
-        for l in client_logs
-    ]
-    
-    return {
-        "id": log.get('id'),
-        "index": log_index,
-        "timestamp": log.get('timestamp'),
-        "client_id": log.get('client_id'),
-        "ip": log.get('ip'),
-        "query": log.get('query'),
-        "features": log.get('features', {}),
-        "scores": log.get('scores', {}),
-        "decision": log.get('decision'),
-        "explanations": log.get('explanations', []),
-        "latency_ms": log.get('latency_ms'),
-        "client_timeline": client_timeline
-    }
-
-
-@router.get("/api/explain/{query_id}")
-async def get_explanation(query_id: str):
-    """Get explainability data for a specific query by ID."""
-    rb = _get_ring_buffer()
-    log = rb.get_by_id(query_id)
-    
-    if not log:
-        logs = read_all_logs()
-        for entry in logs:
-            if entry.get('id') == query_id:
-                log = entry
-                break
-    
-    if not log:
-        raise HTTPException(status_code=404, detail="Query not found")
-    
-    # Build feature contributions
-    features = log.get('features', {})
-    explanations = log.get('explanations', [])
-    
-    # Create contribution bars from features
-    contributions = []
-    for exp in explanations:
-        contributions.append({
-            "feature": exp.get('feature'),
-            "contribution": exp.get('score', 0) * 100,  # Scale to percentage
-            "description": exp.get('description', '')
-        })
-    
-    # Add inferred contributions from feature values
-    feature_weights = {
-        'max_depth': 3.0,
-        'introspection_score': 15.0,
-        'sensitive_field_count': 5.0,
-        'mutation_score': 8.0,
-        'alias_count': 2.0,
-        'complexity_score': 1.0,
-        'field_count': 0.5
-    }
-    
-    for feat, weight in feature_weights.items():
-        val = features.get(feat, 0)
-        if val > 0:
-            contribution = min(val * weight, 25)  # Cap at 25
-            if not any(c['feature'] == feat for c in contributions):
-                contributions.append({
-                    "feature": feat,
-                    "contribution": round(contribution, 1),
-                    "description": f"{feat}: {val}"
-                })
-    
-    contributions.sort(key=lambda x: x['contribution'], reverse=True)
-    
-    return {
-        "id": log.get('id'),
-        "ensemble_score": log.get('scores', {}).get('ensemble_score', 0),
-        "risk_tier": log.get('scores', {}).get('risk_tier', 'SAFE'),
-        "model_scores": {
-            "autoencoder": log.get('scores', {}).get('autoencoder', 0),
-            "random_forest": log.get('scores', {}).get('random_forest', 0),
-            "lstm": log.get('scores', {}).get('lstm', 0),
-            "gnn": log.get('scores', {}).get('gnn', 0)
-        },
-        "contributions": contributions[:5]  # Top 5
-    }
-
-
-
-class QuarantineActionRequest(BaseModel):
-    key: str
-    reason: Optional[str] = "Manual Administrator Action"
-
-
-@router.get("/api/quarantine")
-async def get_quarantined_actors():
-    """Retrieve list of currently quarantined and blacklisted client actors."""
-    if gateway and hasattr(gateway, "quarantine_manager"):
-        return {"quarantined": gateway.quarantine_manager.list_quarantined()}
-    return {"quarantined": []}
-
-
-@router.post("/api/quarantine/unban")
-async def unban_actor(req: QuarantineActionRequest):
-    """Unban a client IP or client ID from active quarantine."""
-    if gateway and hasattr(gateway, "quarantine_manager"):
-        removed = gateway.quarantine_manager.unban(req.key)
-        return {"status": "ok", "unbanned": req.key, "found": removed}
-    return {"status": "error", "message": "Gateway not initialized"}
-
-
-@router.post("/api/quarantine/blacklist")
-async def blacklist_actor(req: QuarantineActionRequest):
-    """Manually add an actor IP or client ID to the permanent blacklist."""
-    if gateway and hasattr(gateway, "quarantine_manager"):
-        gateway.quarantine_manager.blacklist(req.key, req.reason or "Admin Blacklist")
-        return {"status": "ok", "blacklisted": req.key}
-    return {"status": "error", "message": "Gateway not initialized"}
-
 
 
 @router.get("/metrics")
-async def prometheus_metrics():
-    """Prometheus exposition metrics endpoint for Grafana scrapers."""
-    from fastapi.responses import PlainTextResponse
-    from ..telemetry.prometheus import prometheus_exporter
-    q_count = len(gateway.quarantine_manager.list_quarantined()) if (gateway and hasattr(gateway, "quarantine_manager")) else 0
-    metrics_text = prometheus_exporter.generate_metrics(quarantined_count=q_count)
-    return PlainTextResponse(metrics_text, media_type="text/plain; version=0.0.4; charset=utf-8")
+async def prometheus_metrics(request: Request):
+    """Prometheus scrape endpoint (bearer token required; scrape the backend directly, not through the dashboard proxy)."""
+    gw = _admin(request)
+    model = gw.scorer.model.meta if gw.scorer.model and gw.scorer.model.loaded else {}
+    gauges = {
+        "sentinel_info": ("Build and mode information.", {
+            "version": gw.settings.app.version, "mode": gw.settings.gateway.mode,
+            "enforcement": gw.settings.gateway.enforcement, "model": str(model.get("name") or "none")}, 1),
+        "sentinel_model_loaded": ("1 if the risk model is loaded.", {}, 1 if gw.scorer.model_loaded else 0),
+        "sentinel_tracked_clients": ("Clients tracked by the rate limiter.", {}, gw.rate_limiter.tracked_keys()),
+    }
+    return PlainTextResponse(gw.metrics.render(gauges), media_type="text/plain; version=0.0.4")
+
+
+@router.get("/api/live")
+async def live(request: Request):
+    """Server-sent events: every new audit event as it is recorded."""
+    gw = _admin(request)
+    store = gw.store
+    if not gw.auth.open_stream():
+        raise HTTPException(status_code=429, detail="Too many live streams")
+
+    async def stream():
+        try:
+            last = await asyncio.to_thread(store.max_seq)
+            yield ": connected\n\n"
+            idle = 0
+            while not await request.is_disconnected():
+                events, last = await asyncio.to_thread(store.since, last)
+                for ev in events:
+                    yield f"data: {json.dumps(ev)}\n\n"
+                idle = 0 if events else idle + 1
+                if idle and idle % 15 == 0:
+                    yield ": keep-alive\n\n"
+                await asyncio.sleep(1)
+        finally:
+            gw.auth.close_stream()
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/api/evaluation")
+async def evaluation():
+    path: Path = EVALUATION_FILE
+    if not path.exists():
+        return {"available": False}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"available": False}
+    return {"available": True, **data}
