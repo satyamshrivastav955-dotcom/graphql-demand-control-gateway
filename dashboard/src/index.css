@@ -2,20 +2,151 @@
 @tailwind components;
 @tailwind utilities;
 
-@import './styles/layout.css';
-@import './styles/charts.css';
-@import './styles/components.css';
-
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@layer base {
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+    scroll-padding-top: 72px; /* sticky nav height, so #anchors land below it */
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-ink-950 font-sans text-[14px] leading-[1.55] text-ink-100 antialiased;
+    font-feature-settings: 'cv11', 'ss01', 'calt';
+    font-optical-sizing: auto;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: rgba(255, 255, 255, 0.22);
+  }
+  :focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-white;
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2e3035 transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-ink-600;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  code,
+  kbd,
+  pre,
+  samp {
+    font-feature-settings: 'calt', 'ss01';
+  }
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+@layer components {
+  /* ---------- surfaces ---------- */
+  .panel {
+    @apply rounded-lg border border-line bg-ink-900;
+  }
+  .panel-title {
+    @apply text-[12.5px] font-medium text-ink-200;
+  }
+  .hairline {
+    @apply border-line;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum', 'cv11';
+  }
+  .kbd {
+    @apply inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-[4px] border border-line-strong bg-ink-800 px-1 font-mono text-[10.5px] text-ink-300;
+  }
+
+  /* ---------- controls (white is the primary action; there is no brand hue) ---------- */
+  .btn {
+    @apply inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 text-[13px] font-medium transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-lg {
+    @apply h-10 px-4 text-sm;
+  }
+  .btn-primary {
+    @apply btn bg-white text-ink-950 hover:bg-ink-100;
+  }
+  .btn-secondary {
+    @apply btn border border-line-strong bg-ink-850 text-ink-50 hover:bg-ink-800;
+  }
+  .btn-ghost {
+    @apply btn text-ink-300 hover:bg-white/[0.06] hover:text-ink-50;
+  }
+  .field {
+    @apply h-8 w-full rounded-md border border-line-strong bg-ink-900 px-2.5 text-[13px] text-ink-50 transition-colors placeholder:text-ink-400 hover:border-white/25 focus:border-white/60 focus:outline-none;
+  }
+  textarea.field {
+    @apply h-auto py-2 leading-relaxed;
+  }
+  .th {
+    @apply whitespace-nowrap px-3 py-2 text-left text-[12px] font-medium text-ink-400;
+  }
+  .td {
+    @apply px-3 py-1.5 text-[13px];
+  }
+
+  /* ---------- large type ---------- */
+  .h-display {
+    @apply font-semibold tracking-tightest text-ink-50;
+    font-size: clamp(2.35rem, 4.5vw, 3.9rem);
+    line-height: 1.03;
+  }
+  .h-section {
+    @apply font-semibold tracking-tighter text-ink-50;
+    font-size: clamp(1.75rem, 3.2vw, 2.5rem);
+    line-height: 1.08;
+  }
+  .lead {
+    @apply text-[17px] leading-[1.6] text-ink-300;
+  }
+}
+
+/* SVG shapes that scale from their own centre. */
+.svg-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+/* A faint 1px grid for the hero stage; drawn with gradients so it costs no assets. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.skeleton {
+  background: linear-gradient(90deg, #16171a 25%, #1f2023 50%, #16171a 75%);
+  background-size: 200% 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+  }
 }

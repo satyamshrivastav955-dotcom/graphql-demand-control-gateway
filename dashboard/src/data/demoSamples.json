@@ -1,0 +1,325 @@
+{
+  "recorded_at": "2026-10-29",
+  "engine_version": "1.0.0",
+  "model": "sentinel-risk-hist_gradient_boosting",
+  "model_trained_at": "2026-10-29T20:58:03Z",
+  "ml_weight": 0.4,
+  "note": "Recorded by running each query through the shipped engine (scripts/export_demo_samples.py).",
+  "samples": [
+    {
+      "id": "ordinary",
+      "title": "Ordinary page query",
+      "blurb": "A typical profile view.",
+      "query": "query Profile {\n  user(id: \"42\") {\n    name\n    avatarUrl\n    posts(first: 5) {\n      title\n      createdAt\n    }\n  }\n}",
+      "decision": "ALLOW",
+      "risk_tier": "SAFE",
+      "score": 0.0,
+      "rule_score": 0.0,
+      "ml_score": 0.0008,
+      "limit_violations": [],
+      "explanations": [],
+      "features": {
+        "max_depth": 3,
+        "field_count": 6,
+        "alias_count": 0,
+        "fragment_count": 0,
+        "introspection_score": 0,
+        "sensitive_field_count": 0,
+        "complexity_score": 16,
+        "token_count": 24
+      }
+    },
+    {
+      "id": "nesting",
+      "title": "Nesting abuse",
+      "blurb": "Ten levels of a cyclic relation: cheap to send, expensive to resolve.",
+      "query": "query Deep {\n  user(id: \"1\") { friends { friends { friends { friends { friends { friends { friends { friends { friends { name } } } } } } } } } }\n}",
+      "decision": "THROTTLE",
+      "risk_tier": "HIGH_RISK",
+      "score": 72.4,
+      "rule_score": 54.0,
+      "ml_score": 0.9996,
+      "limit_violations": [],
+      "explanations": [
+        {
+          "rule": "depth",
+          "feature": "max_depth",
+          "value": 11,
+          "points": 54.0,
+          "severity": "high",
+          "description": "Selection nesting is 11 levels deep"
+        },
+        {
+          "rule": "ml_model",
+          "feature": "ml_probability",
+          "value": 1.0,
+          "points": 40.0,
+          "severity": "high",
+          "description": "Trained classifier rates this operation 100% likely abusive"
+        }
+      ],
+      "features": {
+        "max_depth": 11,
+        "field_count": 11,
+        "alias_count": 0,
+        "fragment_count": 0,
+        "introspection_score": 0,
+        "sensitive_field_count": 0,
+        "complexity_score": 12,
+        "token_count": 40
+      }
+    },
+    {
+      "id": "aliases",
+      "title": "Alias batching",
+      "blurb": "Sixty aliased lookups in one request, past the hard limit.",
+      "query": "query Batch {\n  u0: user(id: \"0\") { email }\n  u1: user(id: \"1\") { email }\n  u2: user(id: \"2\") { email }\n  u3: user(id: \"3\") { email }\n  u4: user(id: \"4\") { email }\n  u5: user(id: \"5\") { email }\n  u6: user(id: \"6\") { email }\n  u7: user(id: \"7\") { email }\n  u8: user(id: \"8\") { email }\n  u9: user(id: \"9\") { email }\n  u10: user(id: \"10\") { email }\n  u11: user(id: \"11\") { email }\n  u12: user(id: \"12\") { email }\n  u13: user(id: \"13\") { email }\n  u14: user(id: \"14\") { email }\n  u15: user(id: \"15\") { email }\n  u16: user(id: \"16\") { email }\n  u17: user(id: \"17\") { email }\n  u18: user(id: \"18\") { email }\n  u19: user(id: \"19\") { email }\n  u20: user(id: \"20\") { email }\n  u21: user(id: \"21\") { email }\n  u22: user(id: \"22\") { email }\n  u23: user(id: \"23\") { email }\n  u24: user(id: \"24\") { email }\n  u25: user(id: \"25\") { email }\n  u26: user(id: \"26\") { email }\n  u27: user(id: \"27\") { email }\n  u28: user(id: \"28\") { email }\n  u29: user(id: \"29\") { email }\n  u30: user(id: \"30\") { email }\n  u31: user(id: \"31\") { email }\n  u32: user(id: \"32\") { email }\n  u33: user(id: \"33\") { email }\n  u34: user(id: \"34\") { email }\n  u35: user(id: \"35\") { email }\n  u36: user(id: \"36\") { email }\n  u37: user(id: \"37\") { email }\n  u38: user(id: \"38\") { email }\n  u39: user(id: \"39\") { email }\n  u40: user(id: \"40\") { email }\n  u41: user(id: \"41\") { email }\n  u42: user(id: \"42\") { email }\n  u43: user(id: \"43\") { email }\n  u44: user(id: \"44\") { email }\n  u45: user(id: \"45\") { email }\n  u46: user(id: \"46\") { email }\n  u47: user(id: \"47\") { email }\n  u48: user(id: \"48\") { email }\n  u49: user(id: \"49\") { email }\n  u50: user(id: \"50\") { email }\n  u51: user(id: \"51\") { email }\n  u52: user(id: \"52\") { email }\n  u53: user(id: \"53\") { email }\n  u54: user(id: \"54\") { email }\n  u55: user(id: \"55\") { email }\n  u56: user(id: \"56\") { email }\n  u57: user(id: \"57\") { email }\n  u58: user(id: \"58\") { email }\n  u59: user(id: \"59\") { email }\n}",
+      "decision": "BLOCK",
+      "risk_tier": "CRITICAL",
+      "score": 100.0,
+      "rule_score": 100.0,
+      "ml_score": 0.9999,
+      "limit_violations": [
+        "alias_count>50"
+      ],
+      "explanations": [
+        {
+          "rule": "hard_limit",
+          "feature": "limits",
+          "value": "alias_count>50",
+          "points": 0,
+          "severity": "high",
+          "description": "Hard limit exceeded: alias_count>50"
+        },
+        {
+          "rule": "aliases",
+          "feature": "alias_count",
+          "value": 60,
+          "points": 60.0,
+          "severity": "high",
+          "description": "60 aliased fields can batch many operations into one request"
+        },
+        {
+          "rule": "sensitive_fields",
+          "feature": "sensitive_field_count",
+          "value": 60,
+          "points": 60.0,
+          "severity": "medium",
+          "description": "60 field(s) with credential/PII-like names"
+        },
+        {
+          "rule": "breadth",
+          "feature": "field_count",
+          "value": 120,
+          "points": 30.0,
+          "severity": "medium",
+          "description": "120 fields selected after resolving fragments"
+        },
+        {
+          "rule": "ml_model",
+          "feature": "ml_probability",
+          "value": 1.0,
+          "points": 40.0,
+          "severity": "high",
+          "description": "Trained classifier rates this operation 100% likely abusive"
+        }
+      ],
+      "features": {
+        "max_depth": 2,
+        "field_count": 120,
+        "alias_count": 60,
+        "fragment_count": 0,
+        "introspection_score": 0,
+        "sensitive_field_count": 60,
+        "complexity_score": 180,
+        "token_count": 664
+      }
+    },
+    {
+      "id": "fragments",
+      "title": "Fragment bomb",
+      "blurb": "Eight fragments each spreading the next three times: the expanded query is astronomically large, the document is tiny.",
+      "query": "query Bomb {\n  users(first: 5) { ...L0 }\n}\nfragment L0 on User { id ...L1 ...L1 ...L1 }\nfragment L1 on User { id ...L2 ...L2 ...L2 }\nfragment L2 on User { id ...L3 ...L3 ...L3 }\nfragment L3 on User { id ...L4 ...L4 ...L4 }\nfragment L4 on User { id ...L5 ...L5 ...L5 }\nfragment L5 on User { id ...L6 ...L6 ...L6 }\nfragment L6 on User { id ...L7 ...L7 ...L7 }\nfragment L7 on User { id ...L8 ...L8 ...L8 }\nfragment L8 on User { id name }",
+      "decision": "BLOCK",
+      "risk_tier": "CRITICAL",
+      "score": 100.0,
+      "rule_score": 100.0,
+      "ml_score": 0.9999,
+      "limit_violations": [
+        "complexity>20000"
+      ],
+      "explanations": [
+        {
+          "rule": "hard_limit",
+          "feature": "limits",
+          "value": "complexity>20000",
+          "points": 0,
+          "severity": "high",
+          "description": "Hard limit exceeded: complexity>20000"
+        },
+        {
+          "rule": "fragments",
+          "feature": "fragment_count",
+          "value": 9,
+          "points": 60.0,
+          "severity": "high",
+          "description": "9 fragment definitions (fragment amplification risk)"
+        },
+        {
+          "rule": "complexity",
+          "feature": "complexity_score",
+          "value": 82012,
+          "points": 45.0,
+          "severity": "high",
+          "description": "Estimated cost 82012 (fields, arguments and list-size multipliers)"
+        },
+        {
+          "rule": "breadth",
+          "feature": "field_count",
+          "value": 16403,
+          "points": 30.0,
+          "severity": "medium",
+          "description": "16403 fields selected after resolving fragments"
+        },
+        {
+          "rule": "ml_model",
+          "feature": "ml_probability",
+          "value": 1.0,
+          "points": 40.0,
+          "severity": "high",
+          "description": "Trained classifier rates this operation 100% likely abusive"
+        }
+      ],
+      "features": {
+        "max_depth": 2,
+        "field_count": 16403,
+        "alias_count": 0,
+        "fragment_count": 9,
+        "introspection_score": 0,
+        "sensitive_field_count": 0,
+        "complexity_score": 82012,
+        "token_count": 126
+      }
+    },
+    {
+      "id": "recon",
+      "title": "Schema reconnaissance",
+      "blurb": "A full introspection query, typical of the first step of an attack.",
+      "query": "query IntrospectionQuery {\n  __schema {\n    types {\n      name\n      fields { name type { name kind } }\n    }\n  }\n}",
+      "decision": "THROTTLE",
+      "risk_tier": "HIGH_RISK",
+      "score": 70.0,
+      "rule_score": 50.0,
+      "ml_score": 0.9998,
+      "limit_violations": [],
+      "explanations": [
+        {
+          "rule": "introspection",
+          "feature": "introspection_score",
+          "value": 1,
+          "points": 45.0,
+          "severity": "medium",
+          "description": "Schema introspection (__schema/__type) is typical of reconnaissance"
+        },
+        {
+          "rule": "depth",
+          "feature": "max_depth",
+          "value": 5,
+          "points": 5.0,
+          "severity": "low",
+          "description": "Selection nesting is 5 levels deep"
+        },
+        {
+          "rule": "ml_model",
+          "feature": "ml_probability",
+          "value": 1.0,
+          "points": 40.0,
+          "severity": "high",
+          "description": "Trained classifier rates this operation 100% likely abusive"
+        }
+      ],
+      "features": {
+        "max_depth": 5,
+        "field_count": 8,
+        "alias_count": 0,
+        "fragment_count": 0,
+        "introspection_score": 1,
+        "sensitive_field_count": 0,
+        "complexity_score": 8,
+        "token_count": 20
+      }
+    },
+    {
+      "id": "stuffing",
+      "title": "Credential stuffing",
+      "blurb": "Forty login attempts aliased into one mutation.",
+      "query": "mutation Stuff {\n  t0: login(email: \"victim0@example.com\", password: \"Winter0!\") { token }\n  t1: login(email: \"victim1@example.com\", password: \"Winter1!\") { token }\n  t2: login(email: \"victim2@example.com\", password: \"Winter2!\") { token }\n  t3: login(email: \"victim3@example.com\", password: \"Winter3!\") { token }\n  t4: login(email: \"victim4@example.com\", password: \"Winter4!\") { token }\n  t5: login(email: \"victim5@example.com\", password: \"Winter5!\") { token }\n  t6: login(email: \"victim6@example.com\", password: \"Winter6!\") { token }\n  t7: login(email: \"victim7@example.com\", password: \"Winter7!\") { token }\n  t8: login(email: \"victim8@example.com\", password: \"Winter8!\") { token }\n  t9: login(email: \"victim9@example.com\", password: \"Winter9!\") { token }\n  t10: login(email: \"victim10@example.com\", password: \"Winter10!\") { token }\n  t11: login(email: \"victim11@example.com\", password: \"Winter11!\") { token }\n  t12: login(email: \"victim12@example.com\", password: \"Winter12!\") { token }\n  t13: login(email: \"victim13@example.com\", password: \"Winter13!\") { token }\n  t14: login(email: \"victim14@example.com\", password: \"Winter14!\") { token }\n  t15: login(email: \"victim15@example.com\", password: \"Winter15!\") { token }\n  t16: login(email: \"victim16@example.com\", password: \"Winter16!\") { token }\n  t17: login(email: \"victim17@example.com\", password: \"Winter17!\") { token }\n  t18: login(email: \"victim18@example.com\", password: \"Winter18!\") { token }\n  t19: login(email: \"victim19@example.com\", password: \"Winter19!\") { token }\n  t20: login(email: \"victim20@example.com\", password: \"Winter20!\") { token }\n  t21: login(email: \"victim21@example.com\", password: \"Winter21!\") { token }\n  t22: login(email: \"victim22@example.com\", password: \"Winter22!\") { token }\n  t23: login(email: \"victim23@example.com\", password: \"Winter23!\") { token }\n  t24: login(email: \"victim24@example.com\", password: \"Winter24!\") { token }\n  t25: login(email: \"victim25@example.com\", password: \"Winter25!\") { token }\n  t26: login(email: \"victim26@example.com\", password: \"Winter26!\") { token }\n  t27: login(email: \"victim27@example.com\", password: \"Winter27!\") { token }\n  t28: login(email: \"victim28@example.com\", password: \"Winter28!\") { token }\n  t29: login(email: \"victim29@example.com\", password: \"Winter29!\") { token }\n  t30: login(email: \"victim30@example.com\", password: \"Winter30!\") { token }\n  t31: login(email: \"victim31@example.com\", password: \"Winter31!\") { token }\n  t32: login(email: \"victim32@example.com\", password: \"Winter32!\") { token }\n  t33: login(email: \"victim33@example.com\", password: \"Winter33!\") { token }\n  t34: login(email: \"victim34@example.com\", password: \"Winter34!\") { token }\n  t35: login(email: \"victim35@example.com\", password: \"Winter35!\") { token }\n  t36: login(email: \"victim36@example.com\", password: \"Winter36!\") { token }\n  t37: login(email: \"victim37@example.com\", password: \"Winter37!\") { token }\n  t38: login(email: \"victim38@example.com\", password: \"Winter38!\") { token }\n  t39: login(email: \"victim39@example.com\", password: \"Winter39!\") { token }\n}",
+      "decision": "BLOCK",
+      "risk_tier": "CRITICAL",
+      "score": 100.0,
+      "rule_score": 100.0,
+      "ml_score": 0.9999,
+      "limit_violations": [],
+      "explanations": [
+        {
+          "rule": "aliases",
+          "feature": "alias_count",
+          "value": 40,
+          "points": 60.0,
+          "severity": "high",
+          "description": "40 aliased fields can batch many operations into one request"
+        },
+        {
+          "rule": "sensitive_fields",
+          "feature": "sensitive_field_count",
+          "value": 40,
+          "points": 60.0,
+          "severity": "medium",
+          "description": "40 field(s) with credential/PII-like names"
+        },
+        {
+          "rule": "breadth",
+          "feature": "field_count",
+          "value": 80,
+          "points": 30.0,
+          "severity": "medium",
+          "description": "80 fields selected after resolving fragments"
+        },
+        {
+          "rule": "mutation_sensitive",
+          "feature": "sensitive_field_count",
+          "value": 40,
+          "points": 20.0,
+          "severity": "high",
+          "description": "Mutation touching credential/PII-like fields"
+        },
+        {
+          "rule": "mutation",
+          "feature": "mutation_score",
+          "value": 1,
+          "points": 15.0,
+          "severity": "low",
+          "description": "State-changing operation"
+        },
+        {
+          "rule": "ml_model",
+          "feature": "ml_probability",
+          "value": 1.0,
+          "points": 40.0,
+          "severity": "high",
+          "description": "Trained classifier rates this operation 100% likely abusive"
+        }
+      ],
+      "features": {
+        "max_depth": 2,
+        "field_count": 80,
+        "alias_count": 40,
+        "fragment_count": 0,
+        "introspection_score": 0,
+        "sensitive_field_count": 40,
+        "complexity_score": 160,
+        "token_count": 564
+      }
+    }
+  ]
+}

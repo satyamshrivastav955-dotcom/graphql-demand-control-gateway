@@ -1,46 +1,59 @@
-# Getting Started with Create React App
+# GraphQL Sentinel dashboard
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+React 19 + TypeScript + Tailwind, built with Vite and tested with Vitest. One design system, two surfaces:
 
-## Available Scripts
+* **`/` the public landing page**: dark, high-contrast. A hero stage draws the parsed operation as an SVG tree, scores
+  it and stamps the decision. It replays *recorded* engine output (`src/data/demoSamples.json`, produced by
+  `python scripts/export_demo_samples.py`); every number on the page comes from that file or from the public
+  `GET /api/evaluation`, with honest empty/error states.
+* **`/app/*` the dashboard** (Overview, Analyze, Events, Policies, Evaluation), behind a token gate: collapsible rail,
+  Ctrl/Cmd+K command palette, dense tables with `j`/`k`/Enter, an event inspector, and an Analyze editor that marks the
+  lines that triggered rules. First-run states offer a copyable `curl` and a one-click test request.
 
-In the project directory, you can run:
+Design system: near-black canvas (`#08090a`) with surfaces that step by lightness, 1px hairlines, radius capped at 8px,
+white primary buttons and no brand hue. Colour is reserved for data: allow, throttle and block (and the risk tiers).
+Numerals are tabular. Typography is self-hosted Geist Sans and Geist Mono (`@fontsource-variable/*`, OFL), so the strict
+CSP in `docker/nginx.conf` needs no external origin. Motion honours `prefers-reduced-motion` (the stage shows its final
+frame). Dashboard routes and everything below the landing hero are lazy chunks.
 
-### `npm start`
+## Develop
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
+```bash
+npm install
+npm run dev        # http://localhost:3000, proxies /api and /graphql-proxy to http://localhost:8000
+```
 
-The page will reload if you make edits.\
-You will also see any lint errors in the console.
+Start the backend first (`python scripts/dev.py` prints a session token for the dashboard login). To point at a different
+gateway set `VITE_API_URL` at build time (see `.env.example`), or point the dev proxy elsewhere with `SENTINEL_GATEWAY_URL`; by default requests are same-origin.
 
-### `npm test`
+## Test and build
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```bash
+npm run lint       # ESLint (typescript-eslint, react-hooks)
+npm run typecheck  # tsc --noEmit
+npm test           # Vitest + Testing Library + axe-core (jsdom)
+npm run build      # outputs dist/ (no inline scripts, no third-party requests: satisfies docker/nginx.conf CSP)
+npm run preview    # serve dist/ on :4173 with the same API proxy
+```
 
-### `npm run build`
+The production build is a static SPA. Serve it with a fallback to `index.html` so client-side routes such as `/app/events`
+work on reload (`docker/nginx.conf` does).
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+## Quality gates
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+Automated (`npm run lint`, `typecheck`, `test`, `npm audit`, all run in CI): ESLint, `tsc`, 62 Vitest tests (including an
+axe-core pass over the landing page, every dashboard route and the sign-in gate in jsdom, the command palette, `j`/`k`
+row navigation, `lineMarks` and the reduced-motion demo) and a dependency audit.
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+Measured by hand against the production build (`dist/`) served by the gateway itself (`python scripts/dev.py`), driven in
+headless Edge:
 
-### `npm run eject`
+* **axe-core with colour contrast, real layout**: 0 violations on the landing page, Overview, Analyze, Events, Policies
+  and Evaluation at 1440 and 390 px. Event detail, the sign-in gate and the shadow banner are covered by the jsdom pass
+  only (no contrast check).
+* **Lighthouse on `/`** (one run each, Edge): desktop 100 performance, 100 accessibility, 100 best practices, 100 SEO.
+  Mobile (simulated slow 4G, 4x CPU) 93 / 100 / 100 / 100, with Total Blocking Time (about 320 ms) the limiter.
+* **Layouts**: checked at 1440, 1024, 768 and 390 px; `prefers-reduced-motion` renders the final frame.
+* **Bundle**: landing entry JS 88.6 kB gzip.
 
-**Note: this is a one-way operation. Once you `eject`, you can’t go back!**
-
-If you aren’t satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
-
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you’re on your own.
-
-You don’t have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn’t feel obligated to use this feature. However we understand that this tool wouldn’t be useful if you couldn’t customize it when you are ready for it.
-
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
+Not covered: real screen-reader testing, Safari/Firefox, the dashboard on a 768 px viewport.
