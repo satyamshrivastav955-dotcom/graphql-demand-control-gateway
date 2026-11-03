@@ -1,0 +1,4 @@
+# Optional: Envoy external processor (python -m backend.integrations.envoy_extproc)
+-r requirements.txt
+grpcio==1.85.1
+xds-protos==1.85.1

@@ -5,7 +5,7 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api import routes
+from backend.api import routes, ws
 from backend.api.gateway import GraphQLGateway
 from backend.api.static import mount_dashboard
 from backend.core.config import Settings, load_settings
@@ -58,6 +58,7 @@ def create_app(settings: Optional[Settings] = None, gateway: Optional[GraphQLGat
         return response
 
     app.include_router(routes.router)
+    app.include_router(ws.router)
     mount_dashboard(app, settings)  # last: API routes always win
     return app
 

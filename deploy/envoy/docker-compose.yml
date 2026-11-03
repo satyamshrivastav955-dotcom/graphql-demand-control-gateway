@@ -1,0 +1,29 @@
+# Envoy + Sentinel ext_proc in front of the deliberately vulnerable demo upstream.
+#   docker compose -f deploy/envoy/docker-compose.yml up -d --build
+#   curl -s localhost:18080/graphql -H 'content-type: application/json' -d '{"query":"{ me { id } }"}'
+# Everything is bound to localhost; the upstream is reachable only through Envoy.
+services:
+  upstream:
+    build: { context: ../.., dockerfile: docker/demo-upstream.Dockerfile }
+    environment: { DEMO_WORK_BUDGET: "100000" }
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+  sentinel-extproc:
+    build: { context: ../.., dockerfile: docker/extproc.Dockerfile }
+    environment:
+      SENTINEL_SCHEMA_PATH: /schema/supergraph.graphql
+      SENTINEL_THROTTLE__RATE_LIMIT: "100000"
+      SENTINEL_TELEMETRY__DECISION_LOG: json
+    volumes: ["../../benchmarks/targets/apollo/supergraph.graphql:/schema/supergraph.graphql:ro"]
+    ports: ["127.0.0.1:19102:9102"]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+  envoy:
+    image: envoyproxy/envoy:v1.38-latest
+    command: ["-c", "/etc/envoy/envoy.yaml", "--log-level", "warn"]
+    volumes: ["./envoy.yaml:/etc/envoy/envoy.yaml:ro"]
+    ports: ["127.0.0.1:18080:8080", "127.0.0.1:19901:9901"]
+    depends_on: [upstream, sentinel-extproc]

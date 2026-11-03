@@ -137,10 +137,26 @@ async def get_config(request: Request):
         "tier_actions": s.security.policy.tier_actions,
         "throttle": {"rate_limit": s.throttle.rate_limit, "window_seconds": s.throttle.window_seconds,
                      "risky_quota": s.throttle.risky_quota},
+        "schema": {"loaded": gw.engine.schema is not None,
+                   "federated": bool(gw.engine.schema and gw.engine.schema.federated),
+                   "subgraphs": sorted(gw.engine.schema.graph_names.values()) if gw.engine.schema else []},
+        "persisted_queries": {"mode": s.persisted_queries.mode, "operations": len(gw.allowlist) if gw.allowlist else 0},
+        "batching": {"mode": s.gateway.batching, "max_size": s.limits.max_batch_size},
+        "websocket": {"enabled": s.websocket.enabled, "max_subscriptions": s.websocket.max_subscriptions},
+        "telemetry": {"otel": gw.telemetry.otel, "decision_log": s.telemetry.decision_log},
         "ml_weight": gw.scorer.weight if gw.scorer.model_loaded else 0.0,
         "model": {"loaded": gw.scorer.model_loaded, "name": meta.get("name"),
                   "trained_at": meta.get("trained_at"), "n_features": len(meta.get("feature_names", [])) or None},
     }
+
+
+@router.get("/api/rules")
+async def list_rules():
+    """Public, static: the rule catalogue with OWASP API Security Top 10 (2023) mapping."""
+    from sentinel_core.catalog import CATALOG, OWASP_API_2023
+    return {"owasp": OWASP_API_2023, "rules": [
+        {"id": r.id, "title": r.title, "kind": r.kind, "owasp": list(r.owasp), "attack_class": r.attack_class,
+         "summary": r.summary} for r in CATALOG.values()]}
 
 
 @router.get("/api/events")

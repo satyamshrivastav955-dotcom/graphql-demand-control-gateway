@@ -9,6 +9,10 @@ services:
       context: .
       dockerfile: docker/demo-upstream.Dockerfile
     restart: unless-stopped
+    environment:
+      # Safety fuse for a public demo host: an operation is aborted after this many field resolutions. It still counts
+      # as having reached the unprotected executor. Set to 0 to disable.
+      DEMO_WORK_BUDGET: ${DEMO_WORK_BUDGET:-200000}
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
@@ -34,10 +38,17 @@ services:
       # The backend port is published on 127.0.0.1 only; do not expose it publicly while this is true.
       SENTINEL_TRUST_PROXY_HEADERS: ${SENTINEL_TRUST_PROXY_HEADERS:-true}
       SENTINEL_CORS_ORIGINS: ${SENTINEL_CORS_ORIGINS:-http://localhost:8080}
+      # Schema-aware cost (Apollo-compatible @listSize) and structured decision logs; OpenTelemetry export is on when
+      # SENTINEL_OTLP_ENDPOINT is set (see the `observability` profile below).
+      SENTINEL_SCHEMA_PATH: /schema/schema.graphql
+      SENTINEL_TELEMETRY__DECISION_LOG: ${SENTINEL_DECISION_LOG:-json}
+      SENTINEL_TELEMETRY__ENABLED: ${SENTINEL_TELEMETRY_ENABLED:-false}
+      SENTINEL_OTLP_ENDPOINT: ${SENTINEL_OTLP_ENDPOINT:-}
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${SENTINEL_BACKEND_PORT:-8000}:8000"
     volumes:
       - sentinel-data:/data
+      - ./demo/upstream/schema.graphql:/schema/schema.graphql:ro
     depends_on:
       upstream:
         condition: service_healthy
@@ -56,7 +67,7 @@ services:
       dockerfile: docker/dashboard.Dockerfile
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${SENTINEL_DASHBOARD_PORT:-8080}:8080"
     depends_on:
       backend:
         condition: service_healthy
@@ -64,6 +75,38 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+
+  # --- optional: docker compose --profile observability up --build  (Grafana :3000, Prometheus :9090, Jaeger :16686)
+  # Traces need SENTINEL_TELEMETRY_ENABLED=true and SENTINEL_OTLP_ENDPOINT=http://jaeger:4318 in .env.
+  prometheus:
+    profiles: [observability]
+    image: prom/prometheus:v3.12.0
+    entrypoint: ["/bin/sh", "-c", "printf %s \"$$SENTINEL_API_TOKEN\" > /tmp/sentinel-token && exec /bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=2d"]
+    environment:
+      SENTINEL_API_TOKEN: ${SENTINEL_API_TOKEN:?Set SENTINEL_API_TOKEN}
+    volumes: ["./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"]
+    depends_on: [backend]
+    restart: unless-stopped
+  jaeger:
+    profiles: [observability]
+    image: jaegertracing/all-in-one:1.76.0
+    environment: { COLLECTOR_OTLP_ENABLED: "true" }
+    ports: ["127.0.0.1:${JAEGER_PORT:-16686}:16686"]
+    restart: unless-stopped
+  grafana:
+    profiles: [observability]
+    image: grafana/grafana:12.4.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin-change-me-now}
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["127.0.0.1:${GRAFANA_PORT:-3000}:3000"]
+    depends_on: [prometheus]
+    restart: unless-stopped
 
 volumes:
   sentinel-data:

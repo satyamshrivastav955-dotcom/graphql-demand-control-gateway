@@ -1,0 +1,4 @@
+# Optional: OpenTelemetry export (telemetry.enabled: true). Not needed for JSON decision logs or Prometheus metrics.
+opentelemetry-api==1.45.2
+opentelemetry-sdk==1.45.2
+opentelemetry-exporter-otlp-proto-http==1.45.2

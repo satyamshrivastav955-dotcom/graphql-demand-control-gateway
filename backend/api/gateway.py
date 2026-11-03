@@ -10,16 +10,18 @@ from typing import Any, Dict, List, Mapping, Optional
 
 import httpx
 
-from ..core.analysis import AnalysisError, TooComplexToParse, analyze
+from sentinel_core.engine import Verdict
+
 from ..core.config import Settings
+from ..core.engine_factory import build_engine
 from ..core.features.behavioral_store import BehavioralStore
 from ..core.runtime.alerts import AlertDispatcher
 from ..core.runtime.events import EventStore
 from ..core.runtime.limiter import SlidingWindowLimiter
 from ..core.runtime.metrics import Metrics
-from ..core.security_engine.limits import check_limits
+from ..core.runtime.telemetry import Telemetry
 from ..core.security_engine.policy import SecurityPolicy
-from ..core.security_engine.scorer import SecurityScorer, tier_for
+from ..core.security_engine.scorer import SecurityScorer
 from .auth import AdminAuth
 
 logger = logging.getLogger(__name__)
@@ -41,22 +43,6 @@ class ClientInfo:
 
 
 @dataclass
-class Verdict:
-    decision: str
-    risk_tier: Optional[str]
-    score: Optional[float]
-    rule_score: Optional[float]
-    ml_score: Optional[float]
-    features: Dict[str, float]
-    explanations: List[dict]
-    limit_violations: List[str]
-    operation_name: Optional[str]
-    operation_type: Optional[str]
-    latency_ms: float
-    error: Optional[str] = None
-
-
-@dataclass
 class GatewayResponse:
     status: int
     body: Dict[str, Any]
@@ -68,10 +54,12 @@ class GraphQLGateway:
                  http_client: Optional[httpx.AsyncClient] = None, alert_client: Optional[httpx.AsyncClient] = None):
         self.settings = settings
         self.metrics = Metrics()
+        self.telemetry = Telemetry(settings.telemetry, settings.app.version)
         self.alerts = AlertDispatcher(settings.alerts, self.metrics, alert_client)
         self.store = store
         self.scorer = scorer or SecurityScorer(settings.security.policy, settings.security.introspection)
         self.policy = SecurityPolicy(settings.security.policy)
+        self.engine, self.allowlist = build_engine(settings, self.scorer)
         t = settings.throttle
         self.rate_limiter = SlidingWindowLimiter(t.rate_limit, t.window_seconds, t.max_tracked_clients)
         self.risky_limiter = SlidingWindowLimiter(t.risky_quota, t.window_seconds, t.max_tracked_clients)
@@ -96,6 +84,7 @@ class GraphQLGateway:
             )
 
     async def shutdown(self) -> None:
+        self.telemetry.shutdown()
         await self.alerts.stop()
         if self._client is not None and self._owns_client:
             await self._client.aclose()
@@ -117,60 +106,38 @@ class GraphQLGateway:
 
     # -- analysis -----------------------------------------------------------------------
     def evaluate(self, query: str, operation_name: Optional[str] = None, variables: Optional[dict] = None,
-                 behavior_key: Optional[str] = None) -> Verdict:
-        start = time.perf_counter()
-        s = self.settings
-        empty: Dict[str, Any] = dict(features={}, explanations=[], operation_name=None, operation_type=None)
-        if len(query) > s.limits.max_query_length * 4:
-            # Refuse to even tokenise absurdly large inputs.
-            return Verdict("BLOCK", "CRITICAL", 100.0, 100.0, None, limit_violations=["query_length"],
-                           latency_ms=_ms(start), **empty)
-        try:
-            analysis = analyze(query, operation_name, variables, s.limits.max_tokens)
-        except TooComplexToParse:
-            return Verdict("BLOCK", "CRITICAL", 100.0, 100.0, None, limit_violations=["parse_budget_exceeded"],
-                           latency_ms=_ms(start), **empty)
-        except AnalysisError as exc:
-            return Verdict("ERROR", None, None, None, None, limit_violations=[], latency_ms=_ms(start),
-                           error=str(exc), **empty)
-
-        features = analysis.features
+                 behavior_key: Optional[str] = None, transport: str = "http") -> Verdict:
         behavior = self.behavior.features(behavior_key) if behavior_key else None
-        scored = self.scorer.score(features, behavior)
-        violations = check_limits(features, s.limits, s.security.introspection,
-                                  analysis.fragment_cycle, analysis.unknown_fragments)
-        score, tier = scored["score"], scored["risk_tier"]
-        if violations:
-            # Hard limits can only raise severity, never lower it.
-            thr = s.security.policy.risk_tier_thresholds
-            score = max(score, thr.high_risk + 1)
-            tier = tier_for(score, thr)
-            scored["explanations"].insert(0, {
-                "rule": "hard_limit", "feature": "limits", "value": ", ".join(violations),
-                "points": 0, "severity": "high",
-                "description": "Hard limit exceeded: " + ", ".join(violations),
-            })
-        return Verdict(
-            decision=self.policy.decide(tier, violations), risk_tier=tier, score=score,
-            rule_score=scored["rule_score"], ml_score=scored["ml_score"], features=features,
-            explanations=scored["explanations"], limit_violations=violations,
-            operation_name=analysis.operation_name, operation_type=analysis.operation_type,
-            latency_ms=_ms(start),
-        )
+        return self.engine.evaluate(query, operation_name, variables, behavior, transport)
 
     # -- request handling ---------------------------------------------------------------
     async def handle(self, body: Any, client: ClientInfo) -> GatewayResponse:
+        with self.telemetry.span("sentinel.request", client.headers) as span:
+            resp = await self._handle(body, client)
+            span.set_attribute("http.response.status_code", resp.status)
+            return resp
+
+    async def _handle(self, body: Any, client: ClientInfo) -> GatewayResponse:
         t0 = time.perf_counter()
-        problem = _validate_body(body)
+        is_batch = isinstance(body, list)
+        body, problem = self._resolve_persisted(body)
+        problem = problem or _validate_body(body)
         if problem:
             return GatewayResponse(400, _error(problem, "ERROR", "rejected"), {"X-Sentinel-Decision": "ERROR"})
-        query, op_name, variables = body["query"], body.get("operationName"), body.get("variables")
+        if is_batch:
+            query, op_name, variables = _batch_summary(body), None, None
+        else:
+            query, op_name, variables = body["query"], body.get("operationName"), body.get("variables")
 
         allowed, retry = self.rate_limiter.check(client.ip)
         if not allowed:
             return await self._finish_unscored(query, client, t0, retry)
 
-        verdict = self.evaluate(query, op_name, variables, behavior_key=client.ip)
+        with self.telemetry.span("sentinel.evaluate", batch=is_batch):
+            if is_batch:
+                verdict = self.engine.evaluate_batch(body, self.behavior.features(client.ip))
+            else:
+                verdict = self.evaluate(query, op_name, variables, behavior_key=client.ip)
         self.behavior.record(client.ip, query, is_error=verdict.decision in ("BLOCK", "ERROR"))
 
         sec = {
@@ -202,19 +169,42 @@ class GraphQLGateway:
                     headers["Retry-After"] = str(max(1, int(retry + 0.999)))
                     payload = {"data": None, "errors": [{"message": "Too many high-risk operations; retry later"}]}
             if payload is None:
-                status, payload, enforced, up_status = await self._forward(body, client)
+                with self.telemetry.span("sentinel.forward"):
+                    status, payload, enforced, up_status = await self._forward(body, client)
                 if shadow and enforced == "forwarded":
                     enforced = "shadow"
 
         sec["enforced"] = enforced
+        if self.telemetry.otel:
+            from opentelemetry import trace as _trace
+            self.telemetry.annotate(_trace.get_current_span(), verdict, enforced)
         event = await self._record(client, query, verdict, enforced, up_status, t0)
         sec["event_id"] = event["id"]
-        if not isinstance(payload.get("extensions"), dict):
-            payload["extensions"] = {}
-        payload["extensions"]["security"] = sec
         if enforced == "simulated":
             sec["simulated"] = True
+        for part in (payload if isinstance(payload, list) else [payload]):
+            if isinstance(part, dict):
+                if not isinstance(part.get("extensions"), dict):
+                    part["extensions"] = {}
+                part["extensions"]["security"] = sec
         return GatewayResponse(status, payload, headers)
+
+    def _resolve_persisted(self, body: Any):
+        """Fill in the query text for persisted-query requests that carry only a hash."""
+        if self.allowlist is None:
+            return body, None
+        items = body if isinstance(body, list) else [body]
+        for item in items:
+            if isinstance(item, dict) and not item.get("query") and isinstance(item.get("extensions"), dict):
+                text, err = self.allowlist.resolve(None, item["extensions"])
+                if err:
+                    return body, err
+                item["query"] = text
+            elif isinstance(item, dict) and isinstance(item.get("extensions"), dict):
+                _, err = self.allowlist.resolve(item.get("query"), item["extensions"])
+                if err:
+                    return body, err
+        return body, None
 
     async def _finish_unscored(self, query: str, client: ClientInfo, t0: float, retry: float) -> GatewayResponse:
         verdict = Verdict("THROTTLE", None, None, None, None, {}, [], [], None, None, 0.0)
@@ -235,12 +225,10 @@ class GraphQLGateway:
         if not g.upstream_url or self._client is None:
             return 503, {"data": None, "errors": [{"message": "Upstream GraphQL endpoint is not configured"}]}, \
                 "upstream_error", None
-        out = {"query": body["query"]}
-        if body.get("variables") is not None:
-            out["variables"] = body["variables"]
-        if body.get("operationName"):
-            out["operationName"] = body["operationName"]
+        is_batch = isinstance(body, list)
+        out: Any = [_upstream_body(b) for b in body] if is_batch else _upstream_body(body)
         fwd = {k: v for k, v in client.headers.items() if k.lower() in {h.lower() for h in g.forward_headers}}
+        self.telemetry.inject(fwd)
         try:
             resp = await self._client.post(g.upstream_url, json=out, headers=fwd)
         except httpx.TimeoutException:
@@ -252,10 +240,13 @@ class GraphQLGateway:
             return 502, _error("Upstream returned an error"), "upstream_error", resp.status_code
         try:
             data = resp.json()
-            if not isinstance(data, dict):
-                raise ValueError("not an object")
+            if not isinstance(data, list if is_batch else dict):
+                raise ValueError("unexpected response shape")
         except ValueError:
             return 502, _error("Upstream returned an invalid response"), "upstream_error", resp.status_code
+        if g_mask(self.settings):
+            for part in (data if is_batch else [data]):
+                _mask_suggestions(part)
         return resp.status_code, data, "forwarded", resp.status_code
 
     async def _record(self, client: ClientInfo, query: str, v: Verdict, enforced: str,
@@ -273,12 +264,18 @@ class GraphQLGateway:
         self.metrics.observe("sentinel_request_duration_seconds", event["total_latency_ms"] / 1000.0)
         for violation in v.limit_violations:
             self.metrics.inc("sentinel_hard_limit_violations_total", limit=re.split(r"[<>]", violation)[0])
+        for e in v.explanations:
+            if e.get("points", 0) > 0 and e.get("rule") != "ml_model":
+                self.metrics.inc("sentinel_rule_hits_total", rule=e["rule"], owasp=",".join(e.get("owasp", [])) or "none")
         try:
             stored = await asyncio.to_thread(self.store.add, event)
         except Exception:  # noqa: BLE001 - auditing must not take the gateway down
             logger.error("Failed to persist event", exc_info=True)
             return {"id": "unpersisted"}
         self.alerts.submit(stored)
+        self.telemetry.decision(v, enforced=enforced, client=client.label, event_id=stored.get("id"), query=query,
+                                upstream_status=upstream_status, total_ms=event["total_latency_ms"],
+                                shadow=enforced == "shadow")
         return stored
 
 
@@ -296,9 +293,7 @@ def _error(message: str, decision: str = "ERROR", enforced: str = "upstream_erro
             "extensions": {"security": {"decision": decision, "enforced": enforced}}}
 
 
-def _validate_body(body: Any) -> Optional[str]:
-    if isinstance(body, list):
-        return "Batched (array) requests are not supported; send one operation per request"
+def _validate_one(body: Any) -> Optional[str]:
     if not isinstance(body, dict):
         return "Request body must be a JSON object"
     q = body.get("query")
@@ -309,3 +304,46 @@ def _validate_body(body: Any) -> Optional[str]:
     if body.get("operationName") is not None and not isinstance(body["operationName"], str):
         return "'operationName' must be a string"
     return None
+
+
+def _validate_body(body: Any) -> Optional[str]:
+    if isinstance(body, list):
+        if not body:
+            return "An empty batch is not a valid request"
+        for item in body[:1000]:
+            problem = _validate_one(item)
+            if problem:
+                return problem
+        return None
+    return _validate_one(body)
+
+
+def _batch_summary(batch: list) -> str:
+    """Event text for a batch: the first operations, bounded so a huge batch cannot bloat the audit log."""
+    shown = [str(b.get("query", ""))[:2000] for b in batch[:3] if isinstance(b, dict)]
+    more = f"\n# ... and {len(batch) - 3} more operations" if len(batch) > 3 else ""
+    return f"# batch of {len(batch)} operations\n" + "\n# ---\n".join(shown) + more
+
+
+def _upstream_body(b: dict) -> dict:
+    out = {"query": b["query"]}
+    if b.get("variables") is not None:
+        out["variables"] = b["variables"]
+    if b.get("operationName"):
+        out["operationName"] = b["operationName"]
+    return out
+
+
+_SUGGESTION = re.compile(r"\s*Did you mean [^?]*\?")
+
+
+def g_mask(settings: Settings) -> bool:
+    return settings.gateway.mask_field_suggestions
+
+
+def _mask_suggestions(part: Any) -> None:
+    """Strip 'Did you mean ...?' hints from error messages (they leak schema field names)."""
+    if isinstance(part, dict) and isinstance(part.get("errors"), list):
+        for err in part["errors"]:
+            if isinstance(err, dict) and isinstance(err.get("message"), str):
+                err["message"] = _SUGGESTION.sub("", err["message"])

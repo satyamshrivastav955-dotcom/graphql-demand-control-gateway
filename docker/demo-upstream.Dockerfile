@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
-RUN pip install fastapi==0.141.1 uvicorn==0.52.1 graphql-core==3.2.12 \
+RUN pip install fastapi==0.162.0 uvicorn==0.54.0 graphql-core==3.3.1 \
     && useradd --system --uid 10001 --no-create-home demo
 WORKDIR /app
 COPY demo ./demo

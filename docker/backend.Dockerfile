@@ -2,8 +2,8 @@
 FROM python:3.12-slim AS builder
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 WORKDIR /build
-COPY backend/requirements.txt .
-RUN python -m venv /opt/venv && /opt/venv/bin/pip install -r requirements.txt
+COPY backend/requirements.txt backend/requirements-otel.txt ./
+RUN python -m venv /opt/venv && /opt/venv/bin/pip install -r requirements.txt -r requirements-otel.txt
 
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH" \
@@ -11,6 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PATH="/opt/venv/bin:$PATH" \
 RUN useradd --system --uid 10001 --no-create-home sentinel && mkdir /data && chown sentinel /data
 WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
+COPY sentinel_core ./sentinel_core
 COPY backend ./backend
 COPY ml/reports ./ml/reports
 USER sentinel

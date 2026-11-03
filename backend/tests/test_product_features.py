@@ -79,10 +79,57 @@ def test_config_reports_enforcement_mode(make_harness):
 
 
 # ---- batch requests ---------------------------------------------------------------------------------------
-def test_batched_array_requests_are_rejected_with_a_clear_message(make_harness):
-    h = make_harness()
+def _batch_echo(request):
+    import json as _json
+    ops = _json.loads(request.content)
+    return httpx.Response(200, json=[{"data": {"echo": i}} for i, _ in enumerate(ops)])
+
+
+def test_small_batch_is_analysed_and_forwarded_as_one_array(make_harness):
+    h = make_harness(handler=_batch_echo)
     r = h.client.post("/graphql-proxy", json=[{"query": BENIGN}, {"query": BENIGN}])
-    assert r.status_code == 400 and "Batched" in r.json()["errors"][0]["message"] and h.calls == []
+    assert r.status_code == 200 and isinstance(r.json(), list) and len(r.json()) == 2
+    assert len(h.calls) == 1  # one upstream request for the whole array
+    assert r.json()[0]["extensions"]["security"]["decision"] == "ALLOW"
+
+
+def test_oversized_batch_is_blocked_before_reaching_the_upstream(make_harness):
+    h = make_harness(handler=_batch_echo)
+    r = h.client.post("/graphql-proxy", json=[{"query": BENIGN}] * 11)
+    assert r.status_code == 403 and h.calls == []
+    assert any("batch_size" in v for v in r.json()["extensions"]["security"]["limit_violations"])
+
+
+def test_batched_logins_are_blocked_as_credential_guessing(make_harness):
+    h = make_harness(handler=_batch_echo)
+    ops = [{"query": f'mutation {{ login(email: "a{i}@x.test", password: "pw{i}") {{ token }} }}'} for i in range(8)]
+    r = h.client.post("/graphql-proxy", json=ops)
+    sec = r.json()["extensions"]["security"]
+    assert any(e["rule"] == "auth_bruteforce" and "API2" in e["owasp"] for e in sec["explanations"])
+    assert sec["decision"] != "ALLOW"
+
+
+def test_batching_can_be_switched_off(make_harness):
+    h = make_harness({"gateway": {"batching": "block"}})
+    r = h.client.post("/graphql-proxy", json=[{"query": BENIGN}])
+    assert r.status_code == 403 and h.calls == []
+
+
+def test_invalid_batches_are_rejected(make_harness):
+    h = make_harness()
+    assert h.client.post("/graphql-proxy", json=[]).status_code == 400
+    assert h.client.post("/graphql-proxy", json=[{"query": BENIGN}, {"nope": 1}]).status_code == 400
+    assert h.calls == []
+
+
+def test_field_suggestions_are_masked_in_upstream_errors(make_harness):
+    msg = "Cannot query field 'usrs' on type 'Query'. Did you mean 'users' or 'user'?"
+    h = make_harness(handler=lambda r: httpx.Response(200, json={"data": None, "errors": [{"message": msg}]}))
+    body = h.post("{ usrs }").json()
+    assert "Did you mean" not in body["errors"][0]["message"] and "usrs" in body["errors"][0]["message"]
+    h2 = make_harness({"gateway": {"mask_field_suggestions": False}},
+                      handler=lambda r: httpx.Response(200, json={"data": None, "errors": [{"message": msg}]}))
+    assert "Did you mean" in h2.post("{ usrs }").json()["errors"][0]["message"]
 
 
 # ---- Prometheus metrics -------------------------------------------------------------------------------------
