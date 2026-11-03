@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+scrape_configs:
+  - job_name: sentinel
+    metrics_path: /metrics
+    authorization:
+      credentials_file: /tmp/sentinel-token   # written from SENTINEL_API_TOKEN by the container entrypoint
+    static_configs:
+      - targets: ["backend:8000"]

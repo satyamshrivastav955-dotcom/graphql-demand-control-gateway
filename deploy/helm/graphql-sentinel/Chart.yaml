@@ -1,0 +1,9 @@
+apiVersion: v2
+name: graphql-sentinel
+description: Explainable, OWASP-mapped GraphQL protection as a standalone gateway, a sidecar, or an Envoy external processor
+type: application
+version: 0.1.0
+appVersion: "1.1.0"
+kubeVersion: ">=1.27.0-0"
+keywords: [graphql, security, owasp, envoy, ext_proc]
+home: https://github.com/satyamshrivastav955-dotcom/graphql-demand-control-gateway

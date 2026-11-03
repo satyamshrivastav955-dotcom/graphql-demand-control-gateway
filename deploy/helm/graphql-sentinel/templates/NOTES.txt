@@ -1,0 +1,18 @@
+GraphQL Sentinel {{ .Chart.AppVersion }} deployed in "{{ .Values.mode }}" mode, enforcement: {{ .Values.sentinel.enforcement }}.
+{{- if eq .Values.mode "extproc" }}
+
+Sentinel serves the Envoy ext_proc gRPC API on {{ include "sentinel.fullname" . }}:{{ .Values.extproc.port }}.
+{{- if .Values.envoy.enabled }}
+Send GraphQL traffic to the Envoy service {{ include "sentinel.fullname" . }}-envoy:{{ .Values.service.port }}.
+{{- else }}
+Add the ext_proc filter from deploy/envoy/envoy.yaml to your own Envoy / Istio / Gateway, pointing at the service above.
+{{- end }}
+{{- else }}
+
+Send GraphQL traffic to {{ include "sentinel.fullname" . }}:{{ .Values.service.port }}/graphql-proxy.
+Management token:  kubectl get secret {{ include "sentinel.tokenSecret" . }} -n {{ .Release.Namespace }} -o jsonpath='{.data.{{ .Values.auth.secretKey }}}' | base64 -d
+{{- end }}
+{{- if eq .Values.sentinel.enforcement "shadow" }}
+
+Shadow mode: decisions are recorded and logged but nothing is blocked. Review them, then set sentinel.enforcement=enforce.
+{{- end }}

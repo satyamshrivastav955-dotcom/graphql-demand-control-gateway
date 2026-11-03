@@ -1,0 +1,101 @@
+# mode selects how Sentinel is deployed:
+#   gateway  Deployment + Service that proxies to `upstream.url` (standalone reverse proxy)
+#   sidecar  Deployment of YOUR application with Sentinel as a second container; the Service points at Sentinel
+#   extproc  Sentinel as an Envoy external processor (gRPC); optionally also deploys an Envoy in front (envoy.enabled)
+mode: gateway
+
+image:
+  repository: graphql-sentinel      # build with docker/backend.Dockerfile (gateway/sidecar)
+  extprocRepository: graphql-sentinel-extproc   # build with docker/extproc.Dockerfile
+  tag: ""                           # default: chart appVersion
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+nameOverride: ""
+fullnameOverride: ""
+
+# Management API token (dashboard login, /metrics, /api/*). Never put a real token in a values file.
+auth:
+  existingSecret: ""                # Secret holding the token (>= 16 characters). If empty, a random one is generated.
+  secretKey: token
+
+upstream:
+  url: ""                           # gateway / extproc+envoy: where allowed operations go, e.g. http://api.default.svc:4000/graphql
+
+sidecar:                            # mode: sidecar
+  appImage: ""                      # your GraphQL server image
+  appPort: 4000
+  appPath: /graphql
+  appEnv: []                        # extra env for the app container
+
+sentinel:
+  enforcement: enforce              # enforce | shadow (record decisions, forward everything: start here)
+  introspection: flag               # allow | flag | block
+  trustProxyHeaders: false          # true only behind an ingress that overwrites X-Forwarded-For
+  batching: allow                   # allow | block
+  maskFieldSuggestions: true
+  limits: {}                        # max_depth, max_aliases, max_schema_cost, max_batch_size, ... (SENTINEL_LIMITS__*)
+  throttle: {}                      # rate_limit, window_seconds, risky_quota
+  extraEnv: []
+
+# Schema-aware, federation-aware cost: provide SDL (plain, subgraph or composed supergraph) inline or via a ConfigMap.
+schema:
+  sdl: ""
+  existingConfigMap: ""             # ConfigMap with key `schema.graphql`
+  defaultListSize: 10
+
+persistedQueries:                   # operation allowlist
+  mode: "off"                       # off | log | enforce
+  manifest: ""                      # inline JSON manifest: {"operations":[{"id":"<sha256>","body":"query ..."}]}
+  existingConfigMap: ""             # ConfigMap with key `manifest.json`
+
+telemetry:
+  decisionLog: json                 # structured decision logs on stdout (json | off)
+  otlpEndpoint: ""                  # e.g. http://otel-collector.observability:4318 (image must include requirements-otel.txt)
+
+service:
+  type: ClusterIP
+  port: 8000
+
+extproc:                            # mode: extproc
+  port: 9001
+  metricsPort: 9102
+
+envoy:                              # mode: extproc, also render an Envoy that uses Sentinel as ext_proc
+  enabled: false
+  image: envoyproxy/envoy:v1.38-latest
+  replicaCount: 2
+  port: 8080
+
+metrics:
+  serviceMonitor:
+    enabled: false                  # requires the Prometheus Operator CRDs
+    interval: 15s
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 8
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+networkPolicy:
+  enabled: false
+  ingressFrom: []                   # NetworkPolicyPeer list; empty = any pod in the namespace
+
+persistence:
+  enabled: false                    # audit-event SQLite on a PVC (default emptyDir: events are lost on restart)
+  size: 1Gi
+  storageClassName: ""
+
+resources:
+  requests: { cpu: 250m, memory: 256Mi }
+  limits: { cpu: "1", memory: 512Mi }
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

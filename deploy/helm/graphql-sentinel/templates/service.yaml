@@ -1,0 +1,42 @@
+{{- $extproc := eq .Values.mode "extproc" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sentinel.fullname" . }}
+  labels:
+    {{- include "sentinel.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "sentinel.selector" . | nindent 4 }}
+    app.kubernetes.io/component: sentinel
+  ports:
+    {{- if $extproc }}
+    - name: grpc
+      port: {{ .Values.extproc.port }}
+      targetPort: grpc
+      appProtocol: kubernetes.io/h2c
+    - name: metrics
+      port: {{ .Values.extproc.metricsPort }}
+      targetPort: metrics
+    {{- else }}
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+    {{- end }}
+{{- if not .Values.auth.existingSecret }}
+{{- if not $extproc }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "sentinel.fullname" . }}-auth
+  labels:
+    {{- include "sentinel.labels" . | nindent 4 }}
+type: Opaque
+data:
+  {{- /* Keep the generated token stable across upgrades. */}}
+  {{- $existing := lookup "v1" "Secret" .Release.Namespace (printf "%s-auth" (include "sentinel.fullname" .)) }}
+  {{ .Values.auth.secretKey }}: {{ if $existing }}{{ index $existing.data .Values.auth.secretKey }}{{ else }}{{ randAlphaNum 40 | b64enc }}{{ end }}
+{{- end }}
+{{- end }}

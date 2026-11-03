@@ -1,0 +1,111 @@
+{{- $extproc := eq .Values.mode "extproc" }}
+{{- if not (has .Values.mode (list "gateway" "sidecar" "extproc")) }}{{ fail "mode must be gateway, sidecar or extproc" }}{{ end }}
+{{- if and (eq .Values.mode "sidecar") (not .Values.sidecar.appImage) }}{{ fail "sidecar.appImage is required in sidecar mode" }}{{ end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sentinel.fullname" . }}
+  labels:
+    {{- include "sentinel.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sentinel.selector" . | nindent 6 }}
+      app.kubernetes.io/component: sentinel
+  template:
+    metadata:
+      labels:
+        {{- include "sentinel.selector" . | nindent 8 }}
+        app.kubernetes.io/component: sentinel
+      annotations:
+        checksum/config: {{ printf "%s%s%s" .Values.schema.sdl (toJson .Values.persistedQueries) (toJson .Values.sentinel) | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: sentinel
+          image: {{ include "sentinel.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "sentinel.securityContext" . | nindent 12 }}
+          env:
+            {{- if not $extproc }}
+            - name: SENTINEL_UPSTREAM_URL
+              value: {{ include "sentinel.upstreamUrl" . | quote }}
+            - name: SENTINEL_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "sentinel.tokenSecret" . }}
+                  key: {{ .Values.auth.secretKey }}
+            - name: SENTINEL_DB_PATH
+              value: /data/sentinel.db
+            {{- end }}
+            {{- include "sentinel.env" . | nindent 12 }}
+          ports:
+            {{- if $extproc }}
+            - { name: grpc, containerPort: {{ .Values.extproc.port }} }
+            - { name: metrics, containerPort: {{ .Values.extproc.metricsPort }} }
+            {{- else }}
+            - { name: http, containerPort: 8000 }
+            {{- end }}
+          {{- if $extproc }}
+          args: ["python", "-m", "backend.integrations.envoy_extproc", "--port", "{{ .Values.extproc.port }}", "--metrics-port", "{{ .Values.extproc.metricsPort }}"]
+          readinessProbe:
+            httpGet: { path: /health, port: metrics }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: metrics }
+            periodSeconds: 15
+          {{- else }}
+          readinessProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /api/health, port: http }
+            periodSeconds: 15
+          startupProbe:
+            httpGet: { path: /api/health, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "sentinel.mounts" . | nindent 12 }}
+        {{- if eq .Values.mode "sidecar" }}
+        - name: app
+          image: {{ .Values.sidecar.appImage | quote }}
+          ports:
+            - { name: app, containerPort: {{ .Values.sidecar.appPort }} }
+          {{- with .Values.sidecar.appEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+        {{- end }}
+      volumes:
+        {{- include "sentinel.volumes" . | nindent 8 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
