@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/hero.svg" alt="GraphQL Sentinel: an ordinary query is allowed, a deeply nested query is throttled, and a 434-byte fragment bomb that expands to 16,403 fields is blocked at the gate" width="100%">
+<img src="docs/assets/hero.svg" alt="GraphQL Demand Control Gateway: an ordinary query is allowed, a deeply nested query is throttled, and a 434-byte fragment bomb that expands to 16,403 fields is blocked at the gate" width="100%">
 
 <br>
 
@@ -16,7 +16,7 @@
 
 <br>
 
-**GraphQL Sentinel is an open-source security gateway that reads the GraphQL _operation_, not just the HTTP request.**
+**GraphQL Demand Control Gateway** (historically *GraphQL Sentinel*) is an open-source security gateway that reads the GraphQL _operation_, not just the HTTP request.
 It parses every query into an AST, resolves fragments, scores the abuse risk with rules you can read plus a model you can check,
 and answers **ALLOW**, **THROTTLE** or **BLOCK** before anything reaches your API. Every decision is stored with the rules and
 numbers behind it.
@@ -74,8 +74,8 @@ those apart from a busy dashboard; Sentinel measures what the server would actua
 ## Quick start
 
 ```bash
-git clone https://github.com/satyamshrivastav955-dotcom/GraphQL-Sentinel.git
-cd GraphQL-Sentinel
+git clone https://github.com/satyamshrivastav955-dotcom/graphql-demand-control-gateway.git
+cd graphql-demand-control-gateway
 pip install -r backend/requirements.txt
 python scripts/dev.py
 ```
@@ -128,7 +128,7 @@ See [configuration](docs/configuration.md) and the [rollout guide](docs/deployme
 </details>
 
 <details>
-<summary><b>Docker</b> (not yet verified, see <a href="docs/deployment.md">deployment</a>)</summary>
+<summary><b>Docker</b> (CI verified on Linux; see <a href="docs/deployment.md">deployment</a>)</summary>
 <br>
 
 ```bash
@@ -136,8 +136,8 @@ cp .env.example .env        # set SENTINEL_API_TOKEN (>= 16 characters)
 docker compose up --build   # gateway + dashboard on http://localhost:8080
 ```
 
-The compose file, Dockerfiles, nginx and Caddy configs have been reviewed but **never executed** by the author yet. Treat them
-as a starting point and follow the verification steps in [docs/deployment.md](docs/deployment.md).
+The Docker Compose stack (gateway, dashboard, and demo upstream) is verified in GitHub Actions CI (build, container startup with health checks, and smoke tests passed in run #25). Local Windows Docker verification depends on your local daemon state, and the production Caddy TLS overlay requires a public domain. See [docs/deployment.md](docs/deployment.md).
+
 
 </details>
 
@@ -161,6 +161,23 @@ as a starting point and follow the verification steps in [docs/deployment.md](do
 <br>
 
 ## Results
+
+**Head-to-head, held-out corpus** (990 operations, same upstream and hardware; details and caveats in [BENCHMARKS.md](BENCHMARKS.md)):
+
+| System | Attacks stopped | Heavy-but-legit blocked |
+|---|---|---|
+| No gateway | 11% | 0% |
+| Sentinel, defaults (no schema) | 100% | 47% |
+| **Sentinel + schema** | **100%** | **0%** |
+| graphql-armor 3.2.0, defaults | 85% | 64% |
+| graphql-armor 3.2.0, widened | 70% | 0% |
+| Apollo Router 2.12 (unlicensed; demand control needs a licence) | 23% | 0% |
+
+Load the schema: without it Sentinel cannot separate wide-but-cheap queries from costly ones. Sentinel is also the slowest
+system measured (about 107-134 req/s vs 190-230 for the Node and Router targets); graphql-armor is in-process and nearly free.
+The corpus is self-authored and the ML model added no measurable gain on it.
+
+**Earlier synthetic development benchmark:**
 
 <img src="docs/assets/results.svg" alt="F1 and false-positive rate for five detection methods" width="100%">
 
@@ -229,7 +246,7 @@ chosen on withheld categories**, with rules keeping the final say on very high s
 | `ml/` | Dataset generator, training, evaluation, reports, dataset and model cards |
 | `demo/upstream/` | Intentionally unprotected GraphQL server used as the demo target |
 | `scripts/` | `dev.py`, `e2e_check.py`, `loadtest.py`, asset and spec generators |
-| `deploy/`, `docker/` | Caddy TLS overlay, nginx and Dockerfiles (not yet executed) |
+| `deploy/`, `docker/` | Caddy TLS overlay, nginx, Dockerfiles (Linux Compose stack verified in CI) |
 
 </details>
 
@@ -253,7 +270,7 @@ python scripts/build_readme_assets.py   # regenerate the graphics in this README
 
 ## Honest limits
 
-- **Not production-ready yet.** Docker, nginx and Caddy have never been run; there is no validation on real traffic, rate-limit state is per
+- **Not production-ready yet.** While the core Compose stack is verified in CI, live production Caddy TLS, real traffic validation, and multi-node shared rate limiting remain future work.
   process, and the management API uses one shared token with no roles. [docs/product-readiness.md](docs/product-readiness.md) lists what a v1 needs.
 - **Not a WAF and not an authorisation layer.** It detects operation-level abuse: nesting, fragments, aliases, cost, introspection, batching.
   Broken access control and resolver injection are out of scope.

@@ -2,15 +2,15 @@ import { useRef, useState, KeyboardEvent } from 'react';
 import { Check, Copy } from 'lucide-react';
 import { useCopy } from '../../hooks/motion';
 
-const REPO = 'https://github.com/satyamshrivastav955-dotcom/GraphQL-Sentinel';
+const REPO = 'https://github.com/satyamshrivastav955-dotcom/graphql-demand-control-gateway';
 
 export const SNIPPETS = [
   {
     id: 'local',
     label: 'Local',
     note: 'Python 3.12+ and Node 20+. Builds the dashboard once, then serves the landing page, dashboard and gateway on one port. Prints a session token for the dashboard.',
-    code: `git clone ${REPO}
-cd GraphQL-Sentinel
+    code: `git clone ${REPO}.git
+cd graphql-demand-control-gateway
 pip install -r backend/requirements.txt
 python scripts/dev.py
 # open http://127.0.0.1:8000   (upstream demo on :8001)`,
@@ -18,7 +18,7 @@ python scripts/dev.py
   {
     id: 'docker',
     label: 'Docker Compose',
-    note: 'Gateway, dashboard and a demo upstream. The Compose stack has not yet been verified in CI; run the checklist in docs/deployment.md first.',
+    note: 'Gateway, dashboard and demo upstream. Verified in GitHub Actions CI (build, startup, health checks and smoke tests). See docs/deployment.md.',
     code: `cp .env.example .env
 # set SENTINEL_API_TOKEN in .env (16+ characters)
 docker compose up --build

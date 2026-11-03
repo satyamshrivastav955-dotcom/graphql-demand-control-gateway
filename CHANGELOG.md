@@ -2,6 +2,13 @@
 
 ## 1.0.0 (unreleased)
 
+### Added since the prototype
+* `sentinel_core` library, OWASP API 2023 rule mapping (`docs/owasp-mapping.md`), schema and federation-aware cost,
+  persisted-query allowlist, batch evaluation, field-suggestion masking, WebSocket subscription checks.
+* OpenTelemetry traces and metrics, JSON decision logs, Grafana dashboard, `observability` Compose profile.
+* Envoy ext_proc service (`deploy/envoy`), Helm chart (gateway, sidecar, extproc).
+* Head-to-head benchmark rig and results (`BENCHMARKS.md`).
+
 First complete version. Replaces the earlier prototype, whose proxy returned a mock response and whose ML scores
 did not influence decisions.
 

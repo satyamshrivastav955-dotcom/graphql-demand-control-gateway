@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please report suspected vulnerabilities privately through GitHub's
-["Report a vulnerability"](https://github.com/satyamshrivastav955-dotcom/GraphQL-Sentinel/security/advisories/new)
+["Report a vulnerability"](https://github.com/satyamshrivastav955-dotcom/graphql-demand-control-gateway/security/advisories/new)
 form on this repository rather than opening a public issue. Include the affected version or commit, a minimal
 reproduction (a request body is usually enough) and the impact you observed.
 

@@ -16,7 +16,7 @@ separate it from something a company would put in front of its production API.
 
 | # | Gap | Why it matters | Effort |
 |---|---|---|---|
-| 1 | **Docker/Compose/nginx/Caddy never executed** | Deployment artefacts are unverified; CI Docker job has never run | Hours: run the steps in `docs/deployment.md`, fix what breaks, get CI green |
+| 1 | **Local Windows daemon & Caddy TLS overlay unverified** | Core Linux Compose stack verified in CI (run #25); local Windows daemon & live Caddy TLS overlay remain to be tested | Hours: run the steps in `docs/deployment.md`, test with real DNS |
 | 2 | **No validation on real traffic** | All detection numbers are on synthetic data from one schema; real APIs differ. Thresholds may over/under-block | Weeks: shadow mode on a real API, label a sample, tune |
 | 3 | **Single process, in-memory limiter state** | Cannot scale horizontally or survive restarts without losing rate-limit state | Days: Redis-backed limiter/behaviour store, or sticky routing |
 | 4 | **One shared admin token, no roles/SSO** | No per-user audit, no least privilege, rotation needs restart | Days: OIDC login, roles (viewer/operator), per-key tokens |

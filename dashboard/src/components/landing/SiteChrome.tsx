@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { ArrowUpRight, Menu, X } from 'lucide-react';
 import { Wordmark } from '../Brand';
 
-export const REPO_URL = 'https://github.com/satyamshrivastav955-dotcom/GraphQL-Sentinel';
+export const REPO_URL = 'https://github.com/satyamshrivastav955-dotcom/graphql-demand-control-gateway';
 export const AUTHOR_URL = 'https://github.com/satyamshrivastav955-dotcom';
 export const doc = (path: string) => `${REPO_URL}/blob/main/${path}`;
 
