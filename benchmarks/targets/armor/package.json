@@ -1,0 +1,11 @@
+{
+  "name": "sentinel-bench-armor",
+  "private": true,
+  "type": "module",
+  "description": "graphql-armor (Yoga) benchmark target: same schema as the demo upstream, optional armor profile",
+  "dependencies": {
+    "@escape.tech/graphql-armor": "3.2.0",
+    "graphql": "16.14.0",
+    "graphql-yoga": "6.0.1"
+  }
+}

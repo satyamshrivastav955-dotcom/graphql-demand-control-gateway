@@ -1,0 +1,11 @@
+# Apollo Router 2.12 as it runs WITHOUT a GraphOS licence (this is all that can run in an open benchmark).
+# Verified 2026-11-02: configuring demand_control, or limits.max_depth / max_height / max_aliases / max_root_fields,
+# makes the router exit with "license violation, the router is using features not available for your license".
+# What remains is the stock router: spec validation against the supergraph, introspection off, batching off,
+# and the parser limits (parser_max_tokens / parser_max_recursion, at their defaults).
+supergraph:
+  listen: 0.0.0.0:4000
+  path: /graphql
+  introspection: false
+health_check:
+  listen: 0.0.0.0:8088

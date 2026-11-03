@@ -1,0 +1,7 @@
+{
+  "name": "sentinel-bench-apollo",
+  "private": true,
+  "type": "module",
+  "description": "Composes the supergraph used by the Apollo Router benchmark target",
+  "dependencies": { "@apollo/composition": "2.14.4", "graphql": "16.14.0" }
+}

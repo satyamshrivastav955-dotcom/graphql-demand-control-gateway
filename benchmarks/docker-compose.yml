@@ -1,0 +1,67 @@
+# Benchmark rig: one unprotected upstream and every system under test, all with the same CPU/memory limits.
+# Targets are exercised one at a time by benchmarks/harness/run_benchmark.py; ports are bound to localhost only.
+#   docker compose -f benchmarks/docker-compose.yml up -d --build
+x-limits: &limits
+  cpus: "2"
+  mem_limit: 1g
+  security_opt: ["no-new-privileges:true"]
+  cap_drop: [ALL]
+
+x-sentinel: &sentinel
+  <<: *limits
+  build: { context: .., dockerfile: docker/backend.Dockerfile }
+  depends_on: { upstream: { condition: service_healthy } }
+  environment: &sentinel-env
+    SENTINEL_UPSTREAM_URL: http://upstream:8001/graphql
+    SENTINEL_API_TOKEN: bench-only-token-not-a-secret-0001
+    SENTINEL_THROTTLE__RATE_LIMIT: "100000000"
+    SENTINEL_STORAGE__MAX_EVENTS: "5000"
+
+services:
+  upstream:
+    <<: *limits
+    build: { context: .., dockerfile: docker/demo-upstream.Dockerfile }
+    environment: { DEMO_WORK_BUDGET: "100000" }
+    ports: ["127.0.0.1:18001:8001"]
+
+  sentinel:
+    <<: *sentinel
+    ports: ["127.0.0.1:18010:8000"]
+  sentinel-schema:
+    <<: *sentinel
+    environment:
+      <<: *sentinel-env
+      SENTINEL_SCHEMA_PATH: /schema/supergraph.graphql
+    volumes: ["./targets/apollo/supergraph.graphql:/schema/supergraph.graphql:ro"]
+    ports: ["127.0.0.1:18012:8000"]
+  sentinel-rules:
+    <<: *sentinel
+    environment:
+      <<: *sentinel-env
+      SENTINEL_SECURITY__POLICY__ML_WEIGHT: "0"
+    ports: ["127.0.0.1:18011:8000"]
+
+  armor-off:
+    <<: *limits
+    build: { context: targets/armor }
+    environment: { ARMOR_PROFILE: "off", DEMO_WORK_BUDGET: "100000", PORT: "4001" }
+    ports: ["127.0.0.1:18020:4001"]
+  armor-default:
+    <<: *limits
+    build: { context: targets/armor }
+    environment: { ARMOR_PROFILE: "default", DEMO_WORK_BUDGET: "100000", PORT: "4001" }
+    ports: ["127.0.0.1:18021:4001"]
+  armor-matched:
+    <<: *limits
+    build: { context: targets/armor }
+    environment: { ARMOR_PROFILE: "matched", DEMO_WORK_BUDGET: "100000", PORT: "4001" }
+    ports: ["127.0.0.1:18022:4001"]
+
+  router:
+    <<: *limits
+    image: ghcr.io/apollographql/router:v2.12.0
+    depends_on: { upstream: { condition: service_healthy } }
+    command: ["--config", "/cfg/router.yaml", "--supergraph", "/cfg/supergraph.graphql"]
+    environment: { APOLLO_TELEMETRY_DISABLED: "true" }
+    volumes: ["./targets/apollo:/cfg:ro"]
+    ports: ["127.0.0.1:18030:4000"]

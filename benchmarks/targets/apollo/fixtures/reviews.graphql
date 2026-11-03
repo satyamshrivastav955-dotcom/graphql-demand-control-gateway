@@ -1,0 +1,3 @@
+extend schema @link(url: "https://specs.apollo.dev/federation/v2.12", import: ["@key", "@listSize"])
+type User @key(fields: "id") { id: ID! reviews(first: Int = 10): [Review!]! @listSize(slicingArguments: ["first"], assumedSize: 10) }
+type Review { id: ID! body: String! }
