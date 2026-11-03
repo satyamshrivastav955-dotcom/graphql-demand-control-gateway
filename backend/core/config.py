@@ -1,6 +1,6 @@
 """Typed settings: backend/config/settings.yaml, overridden by environment variables.
 
-Environment overrides:
+SENTINEL_CONFIG_FILE selects a different YAML file. Environment overrides:
   * Aliases: SENTINEL_UPSTREAM_URL, SENTINEL_MODE, SENTINEL_INTROSPECTION, SENTINEL_DEBUG,
     SENTINEL_DB_PATH, SENTINEL_CORS_ORIGINS (comma separated), SENTINEL_TRUST_PROXY_HEADERS.
   * Any setting by path: SENTINEL_<SECTION>__<KEY>, e.g. SENTINEL_LIMITS__MAX_DEPTH=10.
@@ -33,12 +33,17 @@ class GatewaySettings(BaseModel):
     # (report-only rollout). Size limits, parser budgets and the per-IP rate limit still protect the gateway itself.
     enforcement: Literal["enforce", "shadow"] = "enforce"
     upstream_url: Optional[str] = None
+    upstream_ws_url: Optional[str] = None  # default: upstream_url with http -> ws
     upstream_timeout_seconds: float = 10.0
     max_upstream_response_bytes: int = 5_000_000
     forward_headers: List[str] = ["authorization", "x-request-id"]
     trust_proxy_headers: bool = False
     # When non-empty, /graphql-proxy requires `X-API-Key: <one of these>` (the management token is also accepted).
     client_keys: List[str] = []
+    # JSON-array (batched) requests: evaluated as one combined workload and capped at limits.max_batch_size.
+    batching: Literal["allow", "block"] = "allow"
+    # Remove "Did you mean ..." hints from upstream error messages so schema names cannot be harvested.
+    mask_field_suggestions: bool = True
 
     @field_validator("client_keys")
     @classmethod
@@ -65,6 +70,11 @@ class Limits(BaseModel):
     max_aliases: int = 50
     max_complexity: int = 20_000
     max_tokens: int = 5_000
+    # Schema-aware cost (used only when graphql_schema.path is set); soft = where risk starts to rise.
+    max_schema_cost: int = 10_000
+    schema_cost_soft: int = 1_000
+    max_subgraph_cost: int = 5_000
+    max_batch_size: int = 10
 
 
 class TierThresholds(BaseModel):
@@ -90,6 +100,33 @@ class PolicySettings(BaseModel):
 class SecuritySettings(BaseModel):
     introspection: Literal["allow", "flag", "block"] = "flag"
     policy: PolicySettings = PolicySettings()
+
+
+class GraphQLSchemaSettings(BaseModel):
+    """Optional SDL (plain, subgraph or composed supergraph) that turns on schema-aware, federation-aware cost."""
+    path: Optional[str] = None
+    default_list_size: int = Field(default=10, ge=1, le=100_000)
+
+
+class PersistedQuerySettings(BaseModel):
+    """Persisted-operation allowlist. log: record what would be blocked; enforce: only registered operations run."""
+    mode: Literal["off", "log", "enforce"] = "off"
+    manifest: Optional[str] = None
+
+
+class WebSocketSettings(BaseModel):
+    """Subscriptions over WebSocket (graphql-transport-ws): each subscribe message is analysed like an HTTP operation."""
+    enabled: bool = True
+    max_subscriptions: int = Field(default=10, ge=1)
+    max_message_bytes: int = 100_000
+
+
+class TelemetrySettings(BaseModel):
+    """OpenTelemetry export and structured decision logs (all optional)."""
+    enabled: bool = False
+    otlp_endpoint: Optional[str] = None
+    service_name: str = "graphql-sentinel"
+    decision_log: Literal["off", "json"] = "off"
 
 
 class ThrottleSettings(BaseModel):
@@ -158,6 +195,10 @@ class Settings(BaseModel):
     storage: StorageSettings = StorageSettings()
     cors: CorsSettings = CorsSettings()
     alerts: AlertSettings = AlertSettings()
+    graphql_schema: GraphQLSchemaSettings = GraphQLSchemaSettings()
+    persisted_queries: PersistedQuerySettings = PersistedQuerySettings()
+    websocket: WebSocketSettings = WebSocketSettings()
+    telemetry: TelemetrySettings = TelemetrySettings()
 
     def resolved_db_path(self) -> str:
         if self.storage.db_path == ":memory:":
@@ -178,6 +219,10 @@ _ALIASES = {
     "SENTINEL_GATEWAY_KEYS": ("gateway", "client_keys"),
     "SENTINEL_ENFORCEMENT": ("gateway", "enforcement"),
     "SENTINEL_ALERT_WEBHOOK_URL": ("alerts", "webhook_url"),
+    "SENTINEL_SCHEMA_PATH": ("graphql_schema", "path"),
+    "SENTINEL_PERSISTED_MODE": ("persisted_queries", "mode"),
+    "SENTINEL_PERSISTED_MANIFEST": ("persisted_queries", "manifest"),
+    "SENTINEL_OTLP_ENDPOINT": ("telemetry", "otlp_endpoint"),
 }
 
 
@@ -198,7 +243,7 @@ def _coerce(raw: str) -> Any:
 
 def load_settings(path: Optional[str] = None, env: Optional[Mapping[str, str]] = None) -> Settings:
     env_map: Mapping[str, str] = os.environ if env is None else env
-    file = Path(path) if path else DEFAULT_SETTINGS_FILE
+    file = Path(path or env_map.get("SENTINEL_CONFIG_FILE") or DEFAULT_SETTINGS_FILE)
     data: dict = {}
     if file.exists():
         data = yaml.safe_load(file.read_text(encoding="utf-8")) or {}
@@ -210,7 +255,8 @@ def load_settings(path: Optional[str] = None, env: Optional[Mapping[str, str]] =
         if name in ("SENTINEL_CORS_ORIGINS", "SENTINEL_GATEWAY_KEYS"):
             _set(data, target, [o.strip() for o in raw.split(",") if o.strip()])
         elif name in ("SENTINEL_UPSTREAM_URL", "SENTINEL_DB_PATH", "SENTINEL_MODE", "SENTINEL_INTROSPECTION", "SENTINEL_API_TOKEN",
-                      "SENTINEL_ENFORCEMENT", "SENTINEL_ALERT_WEBHOOK_URL"):
+                      "SENTINEL_ENFORCEMENT", "SENTINEL_ALERT_WEBHOOK_URL", "SENTINEL_SCHEMA_PATH",
+                      "SENTINEL_PERSISTED_MODE", "SENTINEL_PERSISTED_MANIFEST", "SENTINEL_OTLP_ENDPOINT"):
             _set(data, target, raw)
         else:
             _set(data, target, _coerce(raw))

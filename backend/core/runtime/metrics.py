@@ -12,6 +12,7 @@ HELP = {
     "sentinel_hard_limit_violations_total": ("counter", "Hard-limit violations, by limit."),
     "sentinel_analysis_duration_seconds": ("histogram", "Time spent parsing, scoring and deciding (excludes upstream)."),
     "sentinel_request_duration_seconds": ("histogram", "Total time to handle a request including the upstream call."),
+    "sentinel_rule_hits_total": ("counter", "Rules that added risk points, by rule and OWASP API 2023 category."),
     "sentinel_alerts_total": ("counter", "Alert webhook notifications, by result (sent, failed, dropped)."),
 }
 
